@@ -118,7 +118,7 @@ class BumpReminder(commands.Cog):
     async def purge_old_disboard(self, channel, except_id=None):
         """Supprime tous les anciens messages Disboard 'Bump effectué !' sauf le dernier (except_id)."""
         disboard_msgs = []
-        async for msg in channel.history(limit=200, oldest_first=False):
+        async for msg in channel.history(limit=200, oldest_first=True):
             if (
                 msg.author.id == DISBOARD_ID and
                 (except_id is None or msg.id != except_id) and
@@ -129,10 +129,10 @@ class BumpReminder(commands.Cog):
                 )
             ):
                 disboard_msgs.append(msg)
-        # Trie du plus récent au plus ancien
-        disboard_msgs.sort(key=lambda m: m.created_at, reverse=True)
+        # Trie du plus ancien au plus récent
+        disboard_msgs.sort(key=lambda m: m.created_at)
         # Supprime tous sauf le plus récent
-        for old_msg in disboard_msgs[1:]:
+        for old_msg in disboard_msgs[:-1]:
             try:
                 await old_msg.delete()
                 logger.info("Ancien message Disboard 'Bump effectué !' supprimé.")
