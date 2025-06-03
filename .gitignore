@@ -3,3 +3,4 @@ logs/
 .env
 data/*.json
 __pycache__/
+anime_people.py

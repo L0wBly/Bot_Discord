@@ -13,9 +13,13 @@ def load_last_bump():
         logger.info("Aucun fichier bump_status.json, on part de zéro.")
         return None
     with open(DATA_FILE, "r") as f:
-        data = json.load(f)
-        logger.info(f"Dernier bump chargé : {data['last_bump']}")
-        return datetime.fromisoformat(data["last_bump"])
+        try:
+            data = json.load(f)
+            logger.info(f"Dernier bump chargé : {data['last_bump']}")
+            return datetime.fromisoformat(data["last_bump"])
+        except Exception:
+            logger.warning("Erreur de lecture bump_status.json, fichier réinitialisé.")
+            return None
 
 def save_last_bump(dt):
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
@@ -27,7 +31,6 @@ class BumpReminder(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.last_bump = load_last_bump()
-        self.last_reminder_message_id = None
         self.remind_task.start()
         logger.info("La task de rappel bump_reminder a démarré.")
 
@@ -48,47 +51,44 @@ class BumpReminder(commands.Cog):
             logger.warning("Rôle à ping introuvable")
             return
 
-        # 1. On vérifie le temps depuis le dernier bump
+        # 1. Vérifie le temps depuis le dernier bump
         last_bump = self.last_bump or now - timedelta(hours=2)
         time_since_bump = (now - last_bump).total_seconds()
         if time_since_bump < BUMP_COOLDOWN:
             return
 
-        # 2. On regarde le dernier message dans le salon
+        # 2. Vérifie si le dernier message est déjà un rappel récent
         try:
-            async for msg in channel.history(limit=1, oldest_first=False):
-                is_last_reminder = False
-                if msg.author == self.bot.user:
-                    if (msg.embeds and msg.embeds[0].title and "bump" in msg.embeds[0].title.lower()):
-                        is_last_reminder = True
+            async for msg in channel.history(limit=1):
+                is_last_reminder = (
+                    msg.author == self.bot.user
+                    and msg.embeds
+                    and msg.embeds[0].title
+                    and "bump" in msg.embeds[0].title.lower()
+                )
                 if is_last_reminder:
-                    # Si le dernier message est déjà un rappel, on vérifie la date
                     time_since_last_reminder = (now - msg.created_at.replace(tzinfo=timezone.utc)).total_seconds()
                     if time_since_last_reminder < REMIND_INTERVAL:
-                        # On attend encore avant de renvoyer un rappel
-                        return
+                        return  # Attend 1h avant un nouveau rappel
         except Exception as e:
             logger.warning(f"Erreur lecture dernier message: {e}")
 
         try:
-            # Supprimer tous les anciens rappels sauf le dernier qui va être posté
             await self.purge_old_reminders(channel)
 
-            # ------ MESSAGE DE RAPPEL STYLÉ EN EMBED ------
             embed = discord.Embed(
                 title="✨ C'est l'heure du bump ! ✨",
                 description=(
                     "Le serveur a besoin de **visibilité** 🚀\n"
                     "Merci de faire un **/bump** pour soutenir la commu !\n"
+                    "> *Ce message disparaîtra dès qu'un bump sera effectué.*"
                 ),
                 color=discord.Color.purple()
             )
             embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/565/565547.png")
             embed.set_footer(text="Merci à tous pour votre soutien ❤️")
 
-            # Ping dans le champ content pour la notif
             reminder = await channel.send(content=role.mention, embed=embed)
-            self.last_reminder_message_id = reminder.id
             logger.info(f"Rappel envoyé dans #{channel.name} ({channel.id}) à {now.isoformat()}")
         except Exception as e:
             logger.error(f"Erreur lors de l'envoi du rappel: {e}")
@@ -96,14 +96,13 @@ class BumpReminder(commands.Cog):
     async def purge_old_reminders(self, channel):
         """Supprime tous les anciens rappels du bot sauf le plus récent."""
         reminder_msgs = []
-        async for msg in channel.history(limit=200, oldest_first=False):
-            is_reminder = False
-            if msg.author == self.bot.user:
-                if msg.embeds and msg.embeds[0].title and "bump" in msg.embeds[0].title.lower():
-                    is_reminder = True
-                if "Il est temps de faire un **/bump** !" in msg.content:
-                    is_reminder = True
-            if is_reminder:
+        async for msg in channel.history(limit=100):
+            if (
+                msg.author == self.bot.user
+                and msg.embeds
+                and msg.embeds[0].title
+                and "bump" in msg.embeds[0].title.lower()
+            ):
                 reminder_msgs.append(msg)
         # Trie du plus récent au plus ancien
         reminder_msgs.sort(key=lambda m: m.created_at, reverse=True)
@@ -116,23 +115,21 @@ class BumpReminder(commands.Cog):
                 logger.warning(f"Impossible de supprimer un rappel : {e}")
 
     async def purge_old_disboard(self, channel, except_id=None):
-        """Supprime tous les anciens messages Disboard 'Bump effectué !' sauf le dernier (except_id)."""
+        """Supprime tous les anciens messages Disboard 'Bump effectué !' sauf le plus récent (except_id)."""
         disboard_msgs = []
-        async for msg in channel.history(limit=200, oldest_first=True):
+        async for msg in channel.history(limit=100):
             if (
-                msg.author.id == DISBOARD_ID and
-                (except_id is None or msg.id != except_id) and
-                (
-                    (msg.content and "bump effectué" in msg.content.lower()) or
-                    (msg.embeds and msg.embeds[0].description and "bump effectué" in msg.embeds[0].description.lower()) or
-                    (msg.embeds and msg.embeds[0].title and "bump réussi" in msg.embeds[0].title.lower())
+                msg.author.id == DISBOARD_ID
+                and (except_id is None or msg.id != except_id)
+                and (
+                    (msg.content and "bump effectué" in msg.content.lower())
+                    or (msg.embeds and msg.embeds[0].description and "bump effectué" in msg.embeds[0].description.lower())
+                    or (msg.embeds and msg.embeds[0].title and "bump réussi" in msg.embeds[0].title.lower())
                 )
             ):
                 disboard_msgs.append(msg)
-        # Trie du plus ancien au plus récent
-        disboard_msgs.sort(key=lambda m: m.created_at)
-        # Supprime tous sauf le plus récent
-        for old_msg in disboard_msgs[:-1]:
+        disboard_msgs.sort(key=lambda m: m.created_at, reverse=True)
+        for old_msg in disboard_msgs[1:]:
             try:
                 await old_msg.delete()
                 logger.info("Ancien message Disboard 'Bump effectué !' supprimé.")
@@ -159,10 +156,7 @@ class BumpReminder(commands.Cog):
                 f"dans #{message.channel.name} ({message.channel.id})"
             )
             channel = message.channel
-
-            # Supprimer tous les anciens rappels
             await self.purge_old_reminders(channel)
-            # Supprimer tous les anciens Disboard sauf ce message (le tout dernier)
             await self.purge_old_disboard(channel, except_id=message.id)
 
 async def setup(bot):
