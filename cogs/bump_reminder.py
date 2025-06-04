@@ -180,5 +180,5 @@ class BumpReminder(commands.Cog):
             # 2) On supprime tous les anciens messages Disboard sauf le bump courant (except_id=message.id)
             await self.purge_old_disboard(channel, except_id=message.id)
 
-    async def setup(self, bot):
-        await bot.add_cog(BumpReminder(bot))
+async def setup(self, bot):
+    await bot.add_cog(BumpReminder(bot))
