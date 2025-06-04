@@ -3,4 +3,4 @@ logs/
 .env
 data/*.json
 __pycache__/
-anime_people.py
+création_list_personnage/
