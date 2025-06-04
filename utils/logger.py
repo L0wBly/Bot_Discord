@@ -1,3 +1,5 @@
+# utils/logger.py
+
 import logging
 import os
 
@@ -16,7 +18,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("BotDiscord")
 
-# --- Filtrer les logs inutiles des libs tierces ---
+# Filtrer les logs trop verbeux des bibliothèques tierces
 logging.getLogger("discord").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 logging.getLogger("websockets").setLevel(logging.WARNING)
