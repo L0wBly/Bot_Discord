@@ -140,13 +140,16 @@ class BumpReminder(commands.Cog):
         async for msg in channel.history(limit=100):
             # On ne veut pas toucher au message dont l'ID est except_id
             if msg.author.id == DISBOARD_ID and msg.id != except_id:
-                # On vérifie que c'est bien un "Bump effectué" (dans content ou embed.description ou embed.title)
                 content_lower = (msg.content or "").lower()
                 embed = msg.embeds[0] if msg.embeds else None
                 embed_desc = (embed.description or "").lower() if embed and embed.description else ""
                 embed_title = (embed.title or "").lower() if embed and embed.title else ""
 
-                if "bump effectué" in content_lower or "bump effectué" in embed_desc or "bump réussi" in embed_title:
+                if (
+                    "bump effectué" in content_lower
+                    or "bump effectué" in embed_desc
+                    or "bump réussi" in embed_title
+                ):
                     try:
                         await msg.delete()
                         logger.info("Ancien message Disboard 'Bump effectué !' supprimé.")
@@ -161,8 +164,16 @@ class BumpReminder(commands.Cog):
             and message.author.id == DISBOARD_ID
             and (
                 (message.content and "bump effectué" in message.content.lower())
-                or (message.embeds and message.embeds[0].description and "bump effectué" in message.embeds[0].description.lower())
-                or (message.embeds and message.embeds[0].title and "bump réussi" in message.embeds[0].title.lower())
+                or (
+                    message.embeds 
+                    and message.embeds[0].description 
+                    and "bump effectué" in message.embeds[0].description.lower()
+                )
+                or (
+                    message.embeds 
+                    and message.embeds[0].title 
+                    and "bump réussi" in message.embeds[0].title.lower()
+                )
             )
         ):
             now = datetime.now(timezone.utc)
@@ -174,11 +185,14 @@ class BumpReminder(commands.Cog):
             )
             channel = message.channel
 
-            # 1) On supprime tous les rappels (on garde plus que le dernier rappel éventuel créé après)
+            # 1) Supprime tous les rappels “C'est l'heure du bump !” (purge_all_reminders)
             await self.purge_all_reminders(channel)
 
-            # 2) On supprime tous les anciens messages Disboard sauf le bump courant (except_id=message.id)
+            # 2) Supprime tous les anciens Disboard “Bump effectué !” sauf celui-ci
             await self.purge_old_disboard(channel, except_id=message.id)
 
-async def setup(self, bot):
+
+# ←─ La fonction setup **doit** se trouver à ce niveau, hors de la classe. 
+#     Sans cela, Discord.py ne la verra pas et vous aurez l’erreur “no setup function”.
+async def setup(bot):
     await bot.add_cog(BumpReminder(bot))
