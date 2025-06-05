@@ -60,9 +60,11 @@ class BumpReminder(commands.Cog):
         await self.bot.wait_until_ready()
         now = datetime.now(timezone.utc)
 
-        # Ne pas envoyer de rappel entre 00h00 et 10h59 (UTC)
-        if 0 <= now.hour < 11:
+        # ─────── Blocage entre 22h00 UTC et 09h00 UTC ───────
+        # 22h00 UTC = 00h00 heure de Paris ; 09h00 UTC = 11h00 heure de Paris
+        if now.hour >= 22 or now.hour < 9:
             return
+        # ─────────────────────────────────────────────────────
 
         # Récupération du canal configuré pour les bumps
         channel = self.bot.get_channel(BUMP_CHANNEL_ID)
