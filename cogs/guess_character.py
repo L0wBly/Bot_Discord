@@ -139,7 +139,7 @@ class GuessCharacter(commands.Cog):
             perso = random.choice(self.personnages)
             p_prenom = perso.get("prenom", "").strip()
             p_nom = perso.get("nom", "").strip()
-            p_anime = perso.get("anime", "Inconnu").strip()
+            p_anime = perso.get("title", "Inconnu").strip()
             p_image = perso.get("image", None)
             p_full = f"{p_prenom} {p_nom}".strip()
             p_valids = {p_prenom.lower(), p_nom.lower(), p_full.lower()}
