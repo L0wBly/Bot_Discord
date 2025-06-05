@@ -7,14 +7,14 @@ import asyncio
 from datetime import timezone
 
 from utils.logger import logger
-from config import GUESS_CHANNEL_ID  # Assurez-vous d’avoir défini GUESS_CHANNEL_ID dans config.py
+from config import GUESS_CHANNEL_ID, GAME_CATEGORY_ID  # Assurez-vous que ces IDs sont corrects dans config.py
 
 
 class GuessCharacter(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # On garde la trace des salons où un jeu est en cours
-        self.active_channels = set()
+        # Pour empêcher un même utilisateur de lancer plusieurs parties simultanément
+        self.active_users = set()
 
         # Chemin vers le JSON des personnages
         self.json_path = os.path.join(
@@ -52,40 +52,89 @@ class GuessCharacter(commands.Cog):
     @commands.command(name="guess", help="Lance un jeu pour deviner un personnage d'anime.")
     async def guess_character(self, ctx):
         # ───────────────────────────────────────────────────────────────────────────
-        # 0) Vérifie que la commande est exécutée dans le salon autorisé
+        # 0) La commande ne fonctionne que dans le salon public “jeu”
         if ctx.channel.id != GUESS_CHANNEL_ID:
-            # Supprime instantanément le message de l’utilisateur
             asyncio.create_task(self.delete_message_after(ctx.message, 0))
-            # Envoie l’erreur et la supprime après 5 secondes
             err = await ctx.send(f"⚠️ Cette commande n’est disponible que dans le salon <#{GUESS_CHANNEL_ID}>.")
             asyncio.create_task(self.delete_message_after(err, 5))
             return
 
-        # 1) Vérifie qu’il n’y a pas déjà un jeu en cours dans ce canal
-        if ctx.channel.id in self.active_channels:
-            err = await ctx.send("⚠️ Un jeu est déjà en cours dans ce salon, veuillez patienter…")
+        # 1) On empêche l’utilisateur d’avoir plusieurs parties ouvertes en même temps
+        if ctx.author.id in self.active_users:
+            err = await ctx.send("⚠️ Vous avez déjà une partie en cours. Terminez-la avant d'en lancer une nouvelle.")
             asyncio.create_task(self.delete_message_after(err, 5))
             return
 
-        # 2) Marque ce salon comme “occupé”
-        self.active_channels.add(ctx.channel.id)
+        # 2) Vérifie que la catégorie de jeu existe
+        guild = ctx.guild
+        category = guild.get_channel(GAME_CATEGORY_ID)
+        if category is None or not isinstance(category, discord.CategoryChannel):
+            err = await ctx.send("⚠️ Impossible de trouver la catégorie de jeu. Contactez un administrateur.")
+            asyncio.create_task(self.delete_message_after(err, 5))
+            return
 
-        # 3) Recharge la liste des personnages
+        # 3) On marque l’utilisateur comme “en partie”
+        self.active_users.add(ctx.author.id)
+
+        # 4) Recharge la liste des personnages
         self.load_characters()
         if not self.personnages:
             warning = await ctx.send("⚠️ Aucun personnage trouvé dans `personnages.json`. Vérifiez le chemin.")
             logger.warning("[GuessCharacter] Aucune donnée, commande annulée.")
-            self.active_channels.discard(ctx.channel.id)
+            self.active_users.discard(ctx.author.id)
             asyncio.create_task(self.delete_message_after(warning, 5))
             return
 
-        # 4) Enregistre l’heure de lancement du jeu (T0)
-        t0 = ctx.message.created_at.replace(tzinfo=timezone.utc)
-
-        # 5) Supprime la commande !guess après 2 secondes
+        # 5) On supprime la commande originale après 2 secondes
         asyncio.create_task(self.delete_message_after(ctx.message, 2))
 
-        # 6) Fonction interne pour choisir un nouveau personnage aléatoire
+        # 6) Création du salon privé pour l’utilisateur
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_messages=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_messages=True)
+        }
+        try:
+            game_channel = await guild.create_text_channel(
+                name=f"guess-{ctx.author.name}",
+                category=category,
+                overwrites=overwrites,
+                reason=f"Salon privé GuessCharacter pour {ctx.author}"
+            )
+        except Exception as e:
+            logger.error(f"[GuessCharacter] Impossible de créer le salon privé pour {ctx.author} : {e}")
+            self.active_users.discard(ctx.author.id)
+            err = await ctx.send("⚠️ Une erreur est survenue lors de la création du salon privé.")
+            asyncio.create_task(self.delete_message_after(err, 5))
+            return
+
+        # ───────────────────────────────────────────────────────────────────────────
+        # 7) Dans le salon public, on propose un bouton “Ouvrir le salon”
+        channel_url = f"https://discord.com/channels/{guild.id}/{game_channel.id}"
+
+        class OpenChannelView(discord.ui.View):
+            def __init__(self, url: str):
+                super().__init__(timeout=None)
+                self.add_item(
+                    discord.ui.Button(
+                        label="🕹️ Ouvrir le salon de jeu",
+                        style=discord.ButtonStyle.link,
+                        url=url
+                    )
+                )
+
+        view_invite = OpenChannelView(channel_url)
+        notice = await ctx.send(
+            f"{ctx.author.mention}, votre salon privé de jeu est prêt :",
+            view=view_invite
+        )
+        asyncio.create_task(self.delete_message_after(notice, 10))
+
+        # 8) Message de bienvenue dans le salon privé
+        await game_channel.send(f"{ctx.author.mention}, bienvenue dans votre salon de jeu ! Lancez vos tentatives ici.")
+
+        # ───────────────────────────────────────────────────────────────────────────
+        # 9) Fonction interne pour choisir un nouveau personnage aléatoire
         def choose_new_character():
             perso = random.choice(self.personnages)
             p_prenom = perso.get("prenom", "").strip()
@@ -103,7 +152,7 @@ class GuessCharacter(commands.Cog):
                 "valids": p_valids
             }
 
-        # Initialise le premier personnage
+        # 10) Initialise le premier personnage
         char_data = choose_new_character()
         prenom = char_data["prenom"]
         nom = char_data["nom"]
@@ -114,25 +163,119 @@ class GuessCharacter(commands.Cog):
 
         logger.info(f"[GuessCharacter] {ctx.author} → personnage choisi : {full_name} ({anime})")
 
-        # 7) Variables de suivi du jeu
+        # 11) Variables de suivi du jeu
         attempts = 0
         max_attempts = 10
         found = False
-        hint_level = 0       # 0 = pas d’indice, 1 = 1er indice, 2 = 2ᵉ indice, 3 = 3ᵉ indice
+        hint_level = 0      # 0 = pas d’indice, 1 = 1er indice, 2 = 2ᵉ indice, 3 = 3ᵉ indice
         ended_by_skip = False
 
-        # Pour appeler delete_message_after depuis les views
+        # Pour stocker la tâche de timeout
         cog = self
 
         # ───────────────────────────────────────────────────────────────────────────
-        # 8) View pour les boutons « Skip ➡️ » et « Changer 🔄 »
+        # 12) Fonction “single_timeout” de 3 minutes depuis maintenant
+        async def single_timeout():
+            try:
+                await asyncio.sleep(180)  # 3 minutes
+                # Si on arrive ici, cela signifie qu’aucune annulation n’a été faite dans les 180 s
+                if not found and not ended_by_skip and (ctx.author.id in cog.active_users):
+                    ended_by_skip = True
+
+                    logger.info(
+                        f"[GuessCharacter] Temps écoulé (3 minutes sans nouvelle action) pour {ctx.author} dans le salon {game_channel.id}."
+                    )
+
+                    # Embed final “Temps écoulé”
+                    timeout_embed = discord.Embed(
+                        title="⏲️ Temps écoulé !",
+                        description=(
+                            f"Le temps de 3 minutes sans interaction est écoulé.\n"
+                            f"La réponse était **{full_name}** de *{anime}*."
+                        ),
+                        color=0xe67e22
+                    )
+                    if image_url:
+                        timeout_embed.set_thumbnail(url=image_url)
+                    timeout_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
+
+                    # Bouton “Retour au salon public” dans le salon privé
+                    public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
+                    class ReturnPublicViewTimeout(discord.ui.View):
+                        def __init__(self, url: str):
+                            super().__init__(timeout=None)
+                            self.add_item(
+                                discord.ui.Button(
+                                    label="↩️ Retour au salon public",
+                                    style=discord.ButtonStyle.link,
+                                    url=url
+                                )
+                            )
+
+                    view_return_timeout = ReturnPublicViewTimeout(public_url)
+                    await game_channel.send(embed=timeout_embed, view=view_return_timeout)
+
+                    # Supprime l’embed initial (SkipView) s’il est toujours là
+                    await asyncio.sleep(0.1)
+                    try:
+                        await view_skip.main_embed_msg.delete()
+                    except:
+                        pass
+
+                    # On retire l’utilisateur de active_users
+                    cog.active_users.discard(ctx.author.id)
+
+                    # On supprime le salon privé au bout de 7 s
+                    async def delete_game_channel_later():
+                        await asyncio.sleep(7)
+                        try:
+                            await game_channel.delete()
+                        except:
+                            pass
+
+                    asyncio.create_task(delete_game_channel_later())
+            except asyncio.CancelledError:
+                # Annulation de la tâche (victoire, abandon, nouvelle interaction) → on sort proprement
+                return
+
+        # Démarrage du premier timer
+        timeout_task = asyncio.create_task(single_timeout())
+
+        # ───────────────────────────────────────────────────────────────────────────
+        # 13) On crée une tâche “auto-delete channel” pour éviter que le salon ne reste à l’abandon
+        async def auto_delete_channel():
+            await asyncio.sleep(600)  # 30 minutes de durée maximale
+            # Si, au bout de 30 minutes, l’utilisateur est toujours considéré “actif” dans active_users
+            if ctx.author.id in cog.active_users:
+                # On envoie un court message d’avertissement
+                try:
+                    await game_channel.send(
+                        "⏳ Temps maximum de vie du salon atteint (10 minutes). Fermeture automatique."
+                    )
+                except:
+                    pass
+
+                # On retire l’utilisateur de active_users (libère la commande !guess)
+                cog.active_users.discard(ctx.author.id)
+
+                # Suppression du salon au bout de 7 s
+                await asyncio.sleep(7)
+                try:
+                    await game_channel.delete()
+                except:
+                    pass
+
+        # Lancement de la tâche auto-delete
+        asyncio.create_task(auto_delete_channel())
+
+        # ───────────────────────────────────────────────────────────────────────────
+        # 14) View pour les boutons “Skip ➡️” et “Changer 🔄”
         class SkipView(discord.ui.View):
             def __init__(self):
                 super().__init__(timeout=None)
                 self.main_embed_msg: discord.Message = None
 
             def build_hint_embed(self, level: int, remaining: int) -> discord.Embed:
-                # Reconstruit l’embed d’indice en fonction du level et du nombre de tentatives restantes
                 if level == 1:
                     première_lettre = prenom[0] if prenom else ""
                     desc = (
@@ -156,11 +299,7 @@ class GuessCharacter(commands.Cog):
                         f"Et la moitié du nom de famille est **{moitié_nom}…**"
                     )
 
-                embed = discord.Embed(
-                    title="💡 Indice",
-                    description=desc,
-                    color=0xf1c40f
-                )
+                embed = discord.Embed(title="💡 Indice", description=desc, color=0xf1c40f)
                 embed.add_field(name="Tentatives restantes", value=str(remaining), inline=False)
                 if image_url:
                     embed.set_image(url=image_url)
@@ -168,20 +307,23 @@ class GuessCharacter(commands.Cog):
 
             @discord.ui.button(label="Skip ➡️", style=discord.ButtonStyle.primary, custom_id="guess_skip_button")
             async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                nonlocal hint_level, attempts, ended_by_skip
+                nonlocal hint_level, attempts, ended_by_skip, timeout_task
 
-                # Si la partie est déjà terminée (victoire/abandon/timeout), on ignore
+                # Chaque clic sur “Skip” annule l’ancien timer et en crée un nouveau de 3 minutes
+                timeout_task.cancel()
+                timeout_task = asyncio.create_task(single_timeout())
+
                 if found or ended_by_skip:
                     await interaction.response.defer()
                     return
 
-                # Si on était déjà au 3ᵉ indice, on désactive le bouton
+                # Si on est déjà au 3ᵉ indice → on désactive “Skip”
                 if hint_level == 3:
                     button.disabled = True
                     await interaction.response.edit_message(view=self)
                     return
 
-                # Si on était au 2ᵉ indice ET qu’on reclique sur Skip → 3ᵉ indice + EndGameView
+                # Si on était au 2ᵉ indice et qu’on reclique → passe au 3ᵉ indice + EndGameView
                 if hint_level == 2:
                     attempts = 9
                     hint_level = 3
@@ -189,18 +331,13 @@ class GuessCharacter(commands.Cog):
                     await interaction.response.edit_message(embed=new_embed, view=view_end)
                     return
 
-                # Sinon, on passe au palier suivant
+                # Sinon, on monte d’un palier d’indice
                 if hint_level == 0:
                     attempts = 4
                     hint_level = 1
                 elif hint_level == 1:
                     attempts = 6
                     hint_level = 2
-                else:
-                    # Cas improbable : on désactive Skip
-                    button.disabled = True
-                    await interaction.response.edit_message(view=self)
-                    return
 
                 restantes = max_attempts - attempts
                 emb = self.build_hint_embed(hint_level, restantes)
@@ -212,14 +349,17 @@ class GuessCharacter(commands.Cog):
             @discord.ui.button(label="Changer 🔄", style=discord.ButtonStyle.secondary, custom_id="guess_change_button")
             async def change_button(self, interaction: discord.Interaction, button: discord.ui.Button):
                 nonlocal prenom, nom, anime, image_url, full_name, noms_valides
-                nonlocal attempts, hint_level, found
+                nonlocal attempts, hint_level, found, timeout_task
 
-                # Si la partie est déjà terminée, on ignore
+                # Chaque clic sur “Changer” annule l’ancien timer et en crée un nouveau de 3 minutes
+                timeout_task.cancel()
+                timeout_task = asyncio.create_task(single_timeout())
+
                 if found or ended_by_skip:
                     await interaction.response.defer()
                     return
 
-                # On remplace par un nouveau personnage aléatoire
+                # On sélectionne un nouveau personnage aléatoire
                 new_data = choose_new_character()
                 prenom = new_data["prenom"]
                 nom = new_data["nom"]
@@ -228,7 +368,7 @@ class GuessCharacter(commands.Cog):
                 full_name = new_data["full_name"]
                 noms_valides = new_data["valids"]
 
-                # Réinitialise l’état de la partie
+                # Réinitialise l’état du jeu
                 attempts = 0
                 hint_level = 0
                 found = False
@@ -236,24 +376,33 @@ class GuessCharacter(commands.Cog):
                 # Re-crée l’embed de départ
                 start_embed = discord.Embed(
                     title="🎲 Guess the Anime Character",
-                    description="Devinez ce personnage. Si vous êtes bloqué·e, cliquez sur **Skip ➡️** pour un indice, ou sur **Changer 🔄** pour un autre personnage.",
+                    description=(
+                        "Devinez ce personnage. Si vous êtes bloqué·e, cliquez sur **Skip ➡️** "
+                        "pour un indice, ou sur **Changer 🔄** pour un autre personnage."
+                    ),
                     color=0x3498db
                 )
                 start_embed.add_field(name="Tentatives restantes", value=str(max_attempts), inline=False)
                 if image_url:
                     start_embed.set_image(url=image_url)
 
-                # Réactive les boutons et édite le message principal
+                # Réactive les boutons Skip/Changer et on édite le message principal
                 button.disabled = False
-                view_skip.children[0].disabled = False  # le bouton Skip
+                view_skip.children[0].disabled = False  # réactive “Skip”
                 await interaction.response.edit_message(embed=start_embed, view=self)
 
         # ───────────────────────────────────────────────────────────────────────────
-        # 9) View pour le bouton “Fin du jeu 🚫”
+        # 15) View pour le bouton “Fin du jeu 🚫”
         class EndGameView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=None)
+
             @discord.ui.button(label="Fin du jeu 🚫", style=discord.ButtonStyle.danger, custom_id="guess_end_button")
             async def end_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                nonlocal ended_by_skip
+                nonlocal ended_by_skip, timeout_task
+
+                # Annule définitivement le timer de 3 minutes
+                timeout_task.cancel()
 
                 if ended_by_skip:
                     await interaction.response.defer()
@@ -265,136 +414,100 @@ class GuessCharacter(commands.Cog):
                 end_embed = discord.Embed(
                     title="🔚 Partie terminée (Abandon)",
                     description=(
-                        f"⚠️ Vous avez cliqué sur **Fin du jeu** à la dernière tentative.\n"
+                        f"⚠️ Vous avez cliqué sur **Fin du jeu**.\n"
                         f"La réponse était **{full_name}** de *{anime}*."
                     ),
                     color=0xe67e22
                 )
                 if image_url:
                     end_embed.set_thumbnail(url=image_url)
-                end_embed.add_field(name="Tentatives utilisées", value=str(max_attempts), inline=True)
+                end_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
 
-                # Envoie l’embed d’abandon
-                await interaction.response.send_message(embed=end_embed)
+                # Bouton “Retour au salon public” dans le salon privé
+                public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
+                class ReturnPublicView(discord.ui.View):
+                    def __init__(self, url: str):
+                        super().__init__(timeout=None)
+                        self.add_item(
+                            discord.ui.Button(
+                                label="↩️ Retour au salon public",
+                                style=discord.ButtonStyle.link,
+                                url=url
+                            )
+                        )
 
-                # Supprime très rapidement l’embed initial (celui avec SkipView)
+                view_return = ReturnPublicView(public_url)
+                await game_channel.send(embed=end_embed, view=view_return)
+
+                # Supprime l’embed initial (SkipView) s’il est toujours présent
                 await asyncio.sleep(0.1)
                 try:
                     await view_skip.main_embed_msg.delete()
                 except:
                     pass
 
-                # 🕒 On attend 7 secondes, puis purge tout le salon (sauf épinglés)
-                async def delayed_clear():
+                # On retire l’utilisateur de active_users
+                cog.active_users.discard(ctx.author.id)
+
+                # On supprime le salon privé après 7 s
+                async def delete_game_channel_later():
                     await asyncio.sleep(7)
-                    async for m in ctx.channel.history(limit=None):
-                        if not m.pinned:
-                            try:
-                                await m.delete()
-                            except:
-                                pass
+                    try:
+                        await game_channel.delete()
+                    except:
+                        pass
 
-                asyncio.create_task(delayed_clear())
+                asyncio.create_task(delete_game_channel_later())
 
-                # Supprime le message d’abandon au bout de 5 secondes
-                final_msg = await interaction.original_response()
-                asyncio.create_task(cog.delete_message_after(final_msg, 5))
-
-                # Libère immédiatement le salon
-                cog.active_channels.discard(ctx.channel.id)
-
-        # Instancie les vues
+        # Instanciation des views
         view_skip = SkipView()
         view_end = EndGameView()
 
         # ───────────────────────────────────────────────────────────────────────────
-        # 10) Envoie l’embed initial (compteur + image + boutons Skip/Changer)
+        # 16) Envoi de l’embed initial (tentatives restantes + image + boutons) dans le salon privé
         start_embed = discord.Embed(
             title="🎲 Guess the Anime Character",
-            description="Devinez ce personnage. Si vous êtes bloqué·e, cliquez sur **Skip ➡️** pour un indice, ou sur **Changer 🔄** pour un autre personnage.",
+            description=(
+                "Devinez ce personnage. Si vous êtes bloqué·e, cliquez sur **Skip ➡️** "
+                "pour un indice, ou sur **Changer 🔄** pour un autre personnage."
+            ),
             color=0x3498db
         )
         start_embed.add_field(name="Tentatives restantes", value=str(max_attempts), inline=False)
         if image_url:
             start_embed.set_image(url=image_url)
 
-        initial_msg = await ctx.send(embed=start_embed, view=view_skip)
+        initial_msg = await game_channel.send(embed=start_embed, view=view_skip)
         view_skip.main_embed_msg = initial_msg
 
         # ───────────────────────────────────────────────────────────────────────────
-        # 11) On démarre la tâche « timeout » de 3 minutes
-        async def game_timeout():
-            await asyncio.sleep(180)  # 3 minutes
-            nonlocal ended_by_skip, found
-
-            # Si le jeu n’est pas terminé et le salon toujours actif
-            if (not found) and (not ended_by_skip) and (ctx.channel.id in cog.active_channels):
-                ended_by_skip = True
-
-                # ** AJOUT DE LOG DANS LA CONSOLE **
-                logger.info(f"[GuessCharacter] Temps écoulé pour le jeu dans le salon {ctx.channel.id}. Aucune action pendant 180 secondes.")
-
-                # Embed final « Temps écoulé »
-                timeout_embed = discord.Embed(
-                    title="⏲️ Temps écoulé !",
-                    description=(
-                        f"Le temps de 3 minutes est écoulé.\n"
-                        f"La réponse était **{full_name}** de *{anime}*."
-                    ),
-                    color=0xe67e22
-                )
-                if image_url:
-                    timeout_embed.set_thumbnail(url=image_url)
-                timeout_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
-
-                await ctx.send(embed=timeout_embed)
-
-                # Supprime très rapidement l’embed initial (celui avec SkipView) s’il existe encore
-                await asyncio.sleep(0.1)
-                try:
-                    await view_skip.main_embed_msg.delete()
-                except:
-                    pass
-
-                # 🕒 On attend 7 secondes, puis on purge tout le salon (sauf épinglés)
-                async def delayed_clear_timeout():
-                    await asyncio.sleep(7)
-                    async for m in ctx.channel.history(limit=None):
-                        if not m.pinned:
-                            try:
-                                await m.delete()
-                            except:
-                                pass
-
-                asyncio.create_task(delayed_clear_timeout())
-
-                # Libère le salon
-                cog.active_channels.discard(ctx.channel.id)
-
-        timeout_task = asyncio.create_task(game_timeout())
-
-        # ───────────────────────────────────────────────────────────────────────────
-        # 12) Boucle principale pour recevoir les tentatives de l’utilisateur
+        # 17) Boucle principale pour recevoir les tentatives de l’utilisateur
         def check(m: discord.Message):
-            return m.channel == ctx.channel and not m.author.bot
+            return m.channel == game_channel and not m.author.bot
 
         while attempts < max_attempts:
             try:
                 user_msg = await self.bot.wait_for("message", check=check)
-                # Si le joueur retape « !guess » en cours de partie, on l’ignore (pas comptabilisé)
+
+                # À chaque message (tentative), on annule l’ancien timer et on lance un nouveau
+                timeout_task.cancel()
+                timeout_task = asyncio.create_task(single_timeout())
+
+                # Si l’utilisateur retape “!guess” dans le salon privé, on l’ignore
                 if user_msg.content.strip().lower() == "!guess":
                     asyncio.create_task(cog.delete_message_after(user_msg, 0))
                     continue
 
+                # On supprime immédiatement la tentative pour garder le salon propre
                 asyncio.create_task(cog.delete_message_after(user_msg, 0))
 
-                # Si on a déjà abandonné via “Fin du jeu 🚫” ou timeout, on arrête tout
+                # Si la partie est déjà terminée (timeout ou abandon), on arrête
                 if ended_by_skip:
                     return
 
                 contenu = user_msg.content.lower().strip()
 
-                # 12.a) Réponse correcte
+                # 17.a) Réponse correcte
                 if contenu in noms_valides:
                     found = True
                     attempts += 1
@@ -402,61 +515,75 @@ class GuessCharacter(commands.Cog):
 
                     success_embed = discord.Embed(
                         title="✅ Bravo !",
-                        description=f"{user_msg.author.mention}, c'était bien **{full_name}** de *{anime}* !",
+                        description=f"{user_msg.author.mention}, c’était bien **{full_name}** de *{anime}* !",
                         color=0x2ecc71
                     )
                     success_embed.set_thumbnail(url=image_url or "")
                     success_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
                     success_embed.add_field(name="Tentatives restantes", value=str(rest), inline=True)
 
-                    final_msg = await ctx.send(embed=success_embed)
+                    # Annule le timer avant d’envoyer
+                    timeout_task.cancel()
+
+                    # Bouton “Retour au salon public” dans le salon privé
+                    public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
+                    class ReturnPublicViewWin(discord.ui.View):
+                        def __init__(self, url: str):
+                            super().__init__(timeout=None)
+                            self.add_item(
+                                discord.ui.Button(
+                                    label="↩️ Retour au salon public",
+                                    style=discord.ButtonStyle.link,
+                                    url=url
+                                )
+                            )
+
+                    view_return_win = ReturnPublicViewWin(public_url)
+                    await game_channel.send(embed=success_embed, view=view_return_win)
                     logger.info(f"[GuessCharacter] {user_msg.author} a trouvé {full_name} en {attempts} tentative(s).")
 
-                    # Désactive le bouton Skip si présent
+                    # Désactive le bouton Skip s’il reste actif
                     try:
                         view_skip.children[0].disabled = True
                         await view_skip.main_embed_msg.edit(view=view_skip)
                     except:
                         pass
 
-                    # Supprime très rapidement l’embed initial (SkipView)
+                    # Supprime l’embed initial (SkipView)
                     await asyncio.sleep(0.1)
                     try:
                         await view_skip.main_embed_msg.delete()
                     except:
                         pass
 
-                    # 🕒 On attend 7 secondes, puis on purge tout le salon (sauf épinglés)
-                    async def delayed_clear_victory():
+                    # On retire l’utilisateur de active_users et on supprime le salon après 7 s
+                    cog.active_users.discard(ctx.author.id)
+
+                    async def delete_game_channel_later():
                         await asyncio.sleep(7)
-                        async for m in ctx.channel.history(limit=None):
-                            if not m.pinned:
-                                try:
-                                    await m.delete()
-                                except:
-                                    pass
+                        try:
+                            await game_channel.delete()
+                        except:
+                            pass
 
-                    asyncio.create_task(delayed_clear_victory())
-                    asyncio.create_task(cog.delete_message_after(final_msg, 5))
-
-                    # On annule la tâche timeout pour éviter d’interférer
-                    timeout_task.cancel()
-
-                    cog.active_channels.discard(ctx.channel.id)
+                    asyncio.create_task(delete_game_channel_later())
                     return
 
-                # 12.b) Réponse incorrecte
+                # 17.b) Réponse incorrecte
                 attempts += 1
                 rest = max_attempts - attempts
 
-                # Si un indice a déjà été dévoilé, on reconstruit l’embed via build_hint_embed
+                # Si un indice a déjà été dévoilé, on met à jour via build_hint_embed
                 if hint_level > 0:
                     emb = view_skip.build_hint_embed(hint_level, rest)
                     await view_skip.main_embed_msg.edit(embed=emb, view=view_skip)
                 else:
                     basic_embed = discord.Embed(
                         title="🎲 Guess the Anime Character",
-                        description="Devinez ce personnage. Si vous êtes bloqué·e, cliquez sur **Skip ➡️** pour un indice ou **Changer 🔄** pour un autre personnage.",
+                        description=(
+                            "Devinez ce personnage. Si vous êtes bloqué·e, cliquez sur **Skip ➡️** pour un indice "
+                            "ou sur **Changer 🔄** pour un autre personnage."
+                        ),
                         color=0x3498db
                     )
                     basic_embed.add_field(name="Tentatives restantes", value=str(rest), inline=False)
@@ -464,15 +591,15 @@ class GuessCharacter(commands.Cog):
                         basic_embed.set_image(url=image_url)
                     await view_skip.main_embed_msg.edit(embed=basic_embed, view=view_skip)
 
-                # Gestion automatique des indices
+                # Gestion des indices automatiques à 4, 6 et 9 tentatives
                 if attempts in (4, 6, 9):
                     if attempts == max_attempts - 1:
-                        # 9ᵉ tentative → indice n°3 puis passage à EndGameView
+                        # À la 9ᵉ tentative → indice n°3 puis EndGameView
                         hint_embed = view_skip.build_hint_embed(3, rest)
                         await view_skip.main_embed_msg.edit(embed=hint_embed, view=view_end)
                         hint_level = 3
                     else:
-                        # 4ᵉ ou 6ᵉ tentative → on dévoile 1ᵉᵒ ou 2ᵉ indice
+                        # À la 4ᵉ ou 6ᵉ tentative → 1ᵉ ou 2ᵉ indice
                         if attempts == 4:
                             hint_level = 1
                         else:  # attempts == 6
@@ -486,53 +613,65 @@ class GuessCharacter(commands.Cog):
                     break
 
             except asyncio.CancelledError:
+                # Timeout annulé parce qu’on a gagné ou abandonné → on sort proprement
                 break
 
         # ───────────────────────────────────────────────────────────────────────────
-        # 13) Défaite “classique” si l’on est sorti de la boucle sans found ni abandon
+        # 18) Défaite “classique” si on sort de la boucle sans found ni ended_by_skip
         if not found and not ended_by_skip:
+            # Annulation du timer s’il reste actif
+            timeout_task.cancel()
+
             end_embed = discord.Embed(
                 title="🔚 Partie terminée",
-                description=f"Aucune tentative restante.\nLa réponse était **{full_name}** de *{anime}*.",
+                description=(f"Aucune tentative restante.\nLa réponse était **{full_name}** de *{anime}*."),
                 color=0xe67e22
             )
             end_embed.set_thumbnail(url=image_url or "")
             end_embed.add_field(name="Tentatives utilisées", value=str(max_attempts), inline=True)
 
-            final_msg = await ctx.send(embed=end_embed)
+            # Bouton “Retour au salon public” dans le salon privé
+            public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
+            class ReturnPublicViewDefeat(discord.ui.View):
+                def __init__(self, url: str):
+                    super().__init__(timeout=None)
+                    self.add_item(
+                        discord.ui.Button(
+                            label="↩️ Retour au salon public",
+                            style=discord.ButtonStyle.link,
+                            url=url
+                        )
+                    )
+
+            view_return_defeat = ReturnPublicViewDefeat(public_url)
+            await game_channel.send(embed=end_embed, view=view_return_defeat)
             logger.info(f"[GuessCharacter] Échec du jeu pour {full_name} après 10 tentatives.")
 
-            # Désactive Skip si présent
+            # Désactive “Skip” si présent
             try:
                 view_skip.children[0].disabled = True
                 await view_skip.main_embed_msg.edit(view=view_skip)
             except:
                 pass
 
-            # Supprime très rapidement l’embed initial (SkipView)
+            # Supprime l’embed initial (SkipView)
             await asyncio.sleep(0.1)
             try:
                 await view_skip.main_embed_msg.delete()
             except:
                 pass
 
-            # 🕒 On attend 7 secondes, puis on purge tout le salon (sauf épinglés)
-            async def delayed_clear_defeat():
+            # Retire l’utilisateur de active_users et supprime le salon 7 s plus tard
+            cog.active_users.discard(ctx.author.id)
+
+            async def delete_game_channel_later():
                 await asyncio.sleep(7)
-                async for m in ctx.channel.history(limit=None):
-                    if not m.pinned:
-                        try:
-                            await m.delete()
-                        except:
-                            pass
+                try:
+                    await game_channel.delete()
+                except:
+                    pass
 
-            asyncio.create_task(delayed_clear_defeat())
-            asyncio.create_task(cog.delete_message_after(final_msg, 10))
-
-            # On annule la tâche timeout (au cas où)
-            timeout_task.cancel()
-
-            cog.active_channels.discard(ctx.channel.id)
+            asyncio.create_task(delete_game_channel_later())
 
 
 async def setup(bot):

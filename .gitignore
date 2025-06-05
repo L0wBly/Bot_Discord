@@ -3,4 +3,5 @@ logs/
 .env
 data/*.json
 __pycache__/
-création_list_personnage/
+anime_people.py
+création_list_personnage/data/classement_anime.txt
