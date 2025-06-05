@@ -4,4 +4,5 @@ logs/
 data/*.json
 __pycache__/
 anime_people.py
-création_list_personnage/data/classement_anime.txt
+création_list_personnage/data/classement_anime.txt 
+création_list_personnage/data/classement_manga.txt
