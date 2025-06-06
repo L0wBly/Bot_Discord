@@ -18,7 +18,7 @@ class GuessCharacter(commands.Cog):
         # Chemin vers le JSON des personnages
         self.json_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
-            "création_list_personnage",
+            "guess_character",
             "data",
             "personnages.json"
         )
