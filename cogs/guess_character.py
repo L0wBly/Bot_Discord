@@ -56,7 +56,6 @@ class GuessCharacter(commands.Cog, name="Jeu"):
     @commands.command(
         name="guess",
         help="Lance un jeu pour deviner un personnage d'anime.",
-        hidden=True  # Ne s'affiche pas dans une éventuelle aide standard
     )
     async def guess_character(self, ctx):
         """
