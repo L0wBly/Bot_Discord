@@ -50,7 +50,7 @@ class GuessCharacter(commands.Cog):
 
     @commands.command(name="guess", help="Lance un jeu pour deviner un personnage d'anime.")
     async def guess_character(self, ctx):
-        # ───────────────────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────────────
         # 0) La commande ne fonctionne que dans le salon public “jeu”
         if ctx.channel.id != GUESS_CHANNEL_ID:
             asyncio.create_task(self.delete_message_after(ctx.message, 0))
@@ -107,6 +107,7 @@ class GuessCharacter(commands.Cog):
             asyncio.create_task(self.delete_message_after(err, 5))
             return
 
+        # ────────────────────────────────────────────────────────────
         # 7) Dans le salon public, on propose un bouton “Ouvrir le salon”
         channel_url = f"https://discord.com/channels/{guild.id}/{game_channel.id}"
 
@@ -131,6 +132,7 @@ class GuessCharacter(commands.Cog):
         # 8) Message de bienvenue dans le salon privé
         await game_channel.send(f"{ctx.author.mention}, bienvenue dans votre salon de jeu ! Lancez vos tentatives ici.")
 
+        # ────────────────────────────────────────────────────────────
         # Fonction interne pour choisir un nouveau personnage aléatoire
         def choose_new_character():
             perso = random.choice(self.personnages)
@@ -149,13 +151,12 @@ class GuessCharacter(commands.Cog):
                 "valids": p_valids
             }
 
-        # ───────────────────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────────────
         # Vue avec les boutons “Retour au salon public” + “Rejouer 🔄”
-        class EndGameReplayView(discord.ui.View):
-            def __init__(self, bot, public_url: str):
+        class EndGameView(discord.ui.View):
+            def __init__(self, public_url: str):
                 super().__init__(timeout=None)
-                self.bot = bot
-                # Bouton “Retour au salon public” (lien - pas de custom_id)
+                # Bouton “Retour au salon public” (lien)
                 self.add_item(
                     discord.ui.Button(
                         label="↩️ Retour au salon public",
@@ -172,13 +173,12 @@ class GuessCharacter(commands.Cog):
                     )
                 )
 
-        # ───────────────────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────────────
         # Mise en place d’une suppression automatique si 15 minutes d’inactivité
         inactivity_task = None
 
         async def schedule_inactivity_deletion():
             await asyncio.sleep(15 * 60)  # 15 minutes
-            # Si le salon existe toujours et que l’utilisateur n’a pas relancé
             if ctx.author.id in self.active_users:
                 self.active_users.discard(ctx.author.id)
                 try:
@@ -192,13 +192,13 @@ class GuessCharacter(commands.Cog):
                 inactivity_task.cancel()
             inactivity_task = asyncio.create_task(schedule_inactivity_deletion())
 
-        # Lance immédiatement le timer d’inactivité (15 min)
+        # Dès qu’on a créé le salon, on lance le timer d’inactivité de 15 minutes
         reset_inactivity_timer()
 
-        # ───────────────────────────────────────────────────────────────────────────
+        # ────────────────────────────────────────────────────────────
         # Boucle principale pour gérer plusieurs parties dans le même salon
         while True:
-            # Chargement d’un nouveau personnage à chaque partie
+            # À chaque nouvelle partie, on charge un personnage
             char_data = choose_new_character()
             prenom = char_data["prenom"]
             nom = char_data["nom"]
@@ -213,14 +213,14 @@ class GuessCharacter(commands.Cog):
             attempts = 0
             max_attempts = 10
             found = False
-            hint_level = 0      # 0 = pas d’indice, 1 = 1ᵉ indice, 2 = 2ᵉ indice, 3 = 3ᵉ indice
+            hint_level = 0   # Indice 0,1,2,3
             ended_by_skip = False
 
-            # Pour stocker la tâche de timeout de 3 minutes
+            # Tâche de timeout de 3 minutes
             timeout_task = None
 
-            # ───────────────────────────────────────────────────────────────────────────
-            # Fonction “single_timeout” de 3 minutes
+            # ────────────────────────────────────────────────────────────
+            # Fonction “single_timeout” (3 minutes sans interaction)
             async def single_timeout():
                 nonlocal attempts, ended_by_skip, found, timeout_task
                 try:
@@ -228,7 +228,7 @@ class GuessCharacter(commands.Cog):
                     if not found and not ended_by_skip and (ctx.author.id in self.active_users):
                         ended_by_skip = True
                         logger.info(
-                            f"[GuessCharacter] Temps écoulé (3 minutes sans action) pour {ctx.author} dans le salon {game_channel.id}."
+                            f"[GuessCharacter] Temps écoulé (3m sans action) pour {ctx.author} dans le salon {game_channel.id}."
                         )
 
                         # Embed final “Temps écoulé”
@@ -245,8 +245,8 @@ class GuessCharacter(commands.Cog):
                         timeout_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
 
                         public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
-                        view_replay_timeout = EndGameReplayView(self.bot, public_url)
-                        end_message = await game_channel.send(embed=timeout_embed, view=view_replay_timeout)
+                        view_end = EndGameView(public_url)
+                        end_msg = await game_channel.send(embed=timeout_embed, view=view_end)
 
                         # Supprime l’embed initial (SkipView) s’il existe
                         await asyncio.sleep(0.1)
@@ -256,49 +256,22 @@ class GuessCharacter(commands.Cog):
                         except:
                             pass
 
-                        # ───────────────────────────────────────────────────────────────────
-                        # Création d’une tâche de suppression automatique dans 30 s
-                        async def delete_after_30s():
-                            await asyncio.sleep(30.0)
-                            if ctx.author.id in self.active_users:
-                                self.active_users.discard(ctx.author.id)
-                                try:
-                                    await game_channel.delete()
-                                except:
-                                    pass
+                        # ────────────────────────────────────────────────────────
+                        # Maintenant : je n’utilise PAS de callback “OnClick” pour “Rejouer”.
+                        # Je vais simplement *quitter* la coroutine single_timeout et laisser la boucle
+                        # principale faire un "wait_for(interaction)" sur le bouton "replay_game".
+                        # Dès qu’un nouveau cycle commence, on aura un nouveau personnage.
 
-                        deletion_task = asyncio.create_task(delete_after_30s())
-
-                        # On attend 30 s pour “Rejouer”
-                        def check_interaction(interaction: discord.Interaction):
-                            return (
-                                interaction.user.id == ctx.author.id
-                                and interaction.message.id == end_message.id
-                                and interaction.data.get("custom_id") == "replay_game"
-                            )
-
-                        try:
-                            interaction = await self.bot.wait_for(
-                                "interaction", timeout=30.0, check=check_interaction
-                            )
-                            # S’il clique sur “Rejouer” avant 30 s
-                            if interaction.data.get("custom_id") == "replay_game":
-                                await interaction.response.defer()
-                                deletion_task.cancel()      # Annule la suppression après 30 s
-                                reset_inactivity_timer()   # On réinitialise le timer d’inactivité 15 min
-                                return  # On sort de single_timeout → la boucle principale relancera une nouvelle partie
-                        except asyncio.TimeoutError:
-                            # Si 30 s s’écoulent, delete_after_30s() supprimera déjà le salon
-                            return
+                        return  # On sort de single_timeout → on revient à la boucle principale
 
                 except asyncio.CancelledError:
-                    return  # Annulation propre si on a gagné ou abandonné
+                    return  # Timer annulé (gagné ou abandonné)
 
-            # Démarrage du timer initial de 3 minutes
+            # On démarre le timer de 3 minutes
             timeout_task = asyncio.create_task(single_timeout())
 
-            # ───────────────────────────────────────────────────────────────────────────
-            # View pour les boutons “Skip ➡️” et “Changer 🔄”
+            # ────────────────────────────────────────────────────────────
+            # Vue pour les boutons “Skip ➡️” et “Changer 🔄”
             class SkipView(discord.ui.View):
                 def __init__(self):
                     super().__init__(timeout=None)
@@ -341,7 +314,7 @@ class GuessCharacter(commands.Cog):
                     # Toute interaction reset le timer d’inactivité 15 min
                     reset_inactivity_timer()
 
-                    # Annule l’ancien timer de 3 minutes et en crée un nouveau
+                    # Annule l’ancien timer de 3 minutes et en recrée un nouveau
                     timeout_task.cancel()
                     timeout_task = asyncio.create_task(single_timeout())
 
@@ -426,104 +399,13 @@ class GuessCharacter(commands.Cog):
                     view_skip.children[0].disabled = False  # réactive “Skip”
                     await interaction.response.edit_message(embed=start_embed, view=self)
 
-            # ───────────────────────────────────────────────────────────────────────────
-            # Vue pour le bouton “Fin du jeu 🚫”
-            class EndGameView(discord.ui.View):
-                def __init__(self, bot, public_url: str):
-                    super().__init__(timeout=None)
-                    self.bot = bot
-
-                    # Bouton “Retour au salon public” (lien - pas de custom_id)
-                    self.add_item(
-                        discord.ui.Button(
-                            label="↩️ Retour au salon public",
-                            style=discord.ButtonStyle.link,
-                            url=public_url
-                        )
-                    )
-                    # Le décorateur ci-dessous crée le bouton “Fin du jeu 🚫”.
-
-                @discord.ui.button(label="Fin du jeu 🚫", style=discord.ButtonStyle.danger, custom_id="guess_end_button")
-                async def end_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    nonlocal ended_by_skip, timeout_task
-
-                    # Toute interaction reset le timer d’inactivité 15 min
-                    reset_inactivity_timer()
-
-                    # Annule définitivement le timer de 3 minutes
-                    timeout_task.cancel()
-
-                    if ended_by_skip:
-                        await interaction.response.defer()
-                        return
-
-                    ended_by_skip = True
-
-                    # Embed final d’abandon
-                    end_embed = discord.Embed(
-                        title="🔚 Partie terminée (Abandon)",
-                        description=(
-                            f"⚠️ Vous avez cliqué sur **Fin du jeu**.\n"
-                            f"La réponse était **{full_name}** de *{anime}*."
-                        ),
-                        color=0xe67e22
-                    )
-                    if image_url:
-                        end_embed.set_thumbnail(url=image_url)
-                    end_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
-
-                    public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
-                    view_replay_end = EndGameReplayView(self.bot, public_url)
-                    end_message = await game_channel.send(embed=end_embed, view=view_replay_end)
-
-                    # Supprime l’embed initial (SkipView) s’il est toujours présent
-                    await asyncio.sleep(0.1)
-                    try:
-                        if view_skip.main_embed_msg:
-                            await view_skip.main_embed_msg.delete()
-                    except:
-                        pass
-
-                    # ───────────────────────────────────────────────────────────────────
-                    # Création d’une tâche de suppression automatique dans 30 s
-                    async def delete_after_30s():
-                        await asyncio.sleep(30.0)
-                        if ctx.author.id in self.active_users:
-                            self.active_users.discard(ctx.author.id)
-                            try:
-                                await game_channel.delete()
-                            except:
-                                pass
-
-                    deletion_task = asyncio.create_task(delete_after_30s())
-
-                    # On attend 30 s pour “Rejouer”
-                    def check_interaction(interaction: discord.Interaction):
-                        return (
-                            interaction.user.id == ctx.author.id
-                            and interaction.message.id == end_message.id
-                            and interaction.data.get("custom_id") == "replay_game"
-                        )
-
-                    try:
-                        interaction = await self.bot.wait_for(
-                            "interaction", timeout=30.0, check=check_interaction
-                        )
-                        if interaction.data.get("custom_id") == "replay_game":
-                            await interaction.response.defer()
-                            deletion_task.cancel()      # Annule la suppression après 30 s
-                            reset_inactivity_timer()   # Réinitialise le timer d’inactivité 15 min
-                            return  # La boucle principale relancera une nouvelle partie
-                    except asyncio.TimeoutError:
-                        # Si 30 s s'écoulent, delete_after_30s() supprimera déjà le salon
-                        return
-
-            # ───────────────────────────────────────────────────────────────────────────
-            # Instanciation des views pour cette partie
+            # ────────────────────────────────────────────────────────────
+            # Instanciation des vues pour cette partie
             view_skip = SkipView()
-            view_end = EndGameView(self.bot, f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}")
+            # Pour EndGame (fin de partie), on enverra une instance de EndGameView(...) plus loin
+            view_end = EndGameView(f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}")
 
-            # ───────────────────────────────────────────────────────────────────────────
+            # ────────────────────────────────────────────────────────────
             # Envoi de l’embed initial (tentatives restantes + image + boutons) dans le salon privé
             start_embed = discord.Embed(
                 title="🎲 Guess the Anime Character",
@@ -540,14 +422,14 @@ class GuessCharacter(commands.Cog):
             initial_msg = await game_channel.send(embed=start_embed, view=view_skip)
             view_skip.main_embed_msg = initial_msg
 
-            # ───────────────────────────────────────────────────────────────────────────
+            # ────────────────────────────────────────────────────────────
             # Boucle principale pour recevoir les tentatives de l’utilisateur
-            def check(m: discord.Message):
+            def check_msg(m: discord.Message):
                 return m.channel == game_channel and m.author.id == ctx.author.id and not m.author.bot
 
             while attempts < max_attempts:
                 try:
-                    user_msg = await self.bot.wait_for("message", check=check)
+                    user_msg = await self.bot.wait_for("message", check=check_msg)
 
                     # Toute interaction (envoi de message) reset le timer d’inactivité 15 min
                     reset_inactivity_timer()
@@ -570,7 +452,7 @@ class GuessCharacter(commands.Cog):
 
                     contenu = user_msg.content.lower().strip()
 
-                    # Réponse correcte
+                    # 17.a) Réponse correcte
                     if contenu in noms_valides:
                         found = True
                         attempts += 1
@@ -589,8 +471,8 @@ class GuessCharacter(commands.Cog):
                         timeout_task.cancel()
 
                         public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
-                        view_replay_win = EndGameReplayView(self.bot, public_url)
-                        end_message = await game_channel.send(embed=success_embed, view=view_replay_win)
+                        view_end = EndGameView(public_url)
+                        end_msg = await game_channel.send(embed=success_embed, view=view_end)
                         logger.info(f"[GuessCharacter] {user_msg.author} a trouvé {full_name} en {attempts} tentative(s).")
 
                         # Désactive le bouton Skip s’il reste actif
@@ -608,8 +490,9 @@ class GuessCharacter(commands.Cog):
                         except:
                             pass
 
-                        # ───────────────────────────────────────────────────────────────────
-                        # Création d’une tâche de suppression automatique dans 30 s
+                        # ────────────────────────────────────────────────────────
+                        # ICI : on stoppe la boucle de guesses et on attend l’interaction “Rejouer”
+                        # Création d’une tâche qui supprime le salon au bout de 30 s, si pas de replay
                         async def delete_after_30s():
                             await asyncio.sleep(30.0)
                             if ctx.author.id in self.active_users:
@@ -621,11 +504,11 @@ class GuessCharacter(commands.Cog):
 
                         deletion_task = asyncio.create_task(delete_after_30s())
 
-                        # On attend 30 s pour “Rejouer”
+                        # On attend un clic sur “Rejouer” (custom_id="replay_game") dans les 30 s
                         def check_interaction(interaction: discord.Interaction):
                             return (
                                 interaction.user.id == ctx.author.id
-                                and interaction.message.id == end_message.id
+                                and interaction.message.id == end_msg.id
                                 and interaction.data.get("custom_id") == "replay_game"
                             )
 
@@ -633,24 +516,20 @@ class GuessCharacter(commands.Cog):
                             interaction = await self.bot.wait_for(
                                 "interaction", timeout=30.0, check=check_interaction
                             )
+                            # Si l’utilisateur clique sur “Rejouer” :
                             if interaction.data.get("custom_id") == "replay_game":
                                 await interaction.response.defer()
-                                deletion_task.cancel()    # Annule la suppression après 30 s
-                                reset_inactivity_timer() # Réinitialise le timer d’inactivité 15 min
-                                break  # On relance la boucle principale pour une nouvelle partie
+                                deletion_task.cancel()       # On annule la suppression du salon
+                                reset_inactivity_timer()    # Et on remet 15 min d’inactivité
+                                break  # On sort du while attempts<max_attempts → relance la boucle principale
                         except asyncio.TimeoutError:
-                            pass
+                            # Si 30 s s’écoulent sans clic, deletion_task aura supprimé le salon
+                            return  # On quitte la commande car le salon n’existe plus
 
-                        # Pas de replay → on ferme
-                        self.active_users.discard(ctx.author.id)
-                        await asyncio.sleep(1)
-                        try:
-                            await game_channel.delete()
-                        except:
-                            pass
-                        return  # Quitte la commande
+                        # Si on a break pour “Rejouer”, on revient à la boucle principale
+                        continue
 
-                    # Réponse incorrecte
+                    # 17.b) Réponse incorrecte
                     attempts += 1
                     rest = max_attempts - attempts
 
@@ -696,8 +575,8 @@ class GuessCharacter(commands.Cog):
                 except asyncio.CancelledError:
                     break
 
-            # ───────────────────────────────────────────────────────────────────────────
-            # Défaite “classique” si on sort de la boucle sans found ni ended_by_skip
+            # ────────────────────────────────────────────────────────────
+            # 18) Défaite “classique” si on sort de la boucle sans found ni ended_by_skip
             if not found and not ended_by_skip:
                 timeout_task.cancel()
                 end_embed = discord.Embed(
@@ -709,8 +588,8 @@ class GuessCharacter(commands.Cog):
                 end_embed.add_field(name="Tentatives utilisées", value=str(max_attempts), inline=True)
 
                 public_url = f"https://discord.com/channels/{guild.id}/{GUESS_CHANNEL_ID}"
-                view_replay_defeat = EndGameReplayView(self.bot, public_url)
-                end_message = await game_channel.send(embed=end_embed, view=view_replay_defeat)
+                view_end = EndGameView(public_url)
+                end_msg = await game_channel.send(embed=end_embed, view=view_end)
                 logger.info(f"[GuessCharacter] Échec du jeu pour {full_name} après 10 tentatives.")
 
                 # Désactive “Skip” si présent
@@ -728,7 +607,7 @@ class GuessCharacter(commands.Cog):
                 except:
                     pass
 
-                # ───────────────────────────────────────────────────────────────────
+                # ────────────────────────────────────────────────────────────
                 # Création d’une tâche de suppression automatique dans 30 s
                 async def delete_after_30s():
                     await asyncio.sleep(30.0)
@@ -745,7 +624,7 @@ class GuessCharacter(commands.Cog):
                 def check_interaction(interaction: discord.Interaction):
                     return (
                         interaction.user.id == ctx.author.id
-                        and interaction.message.id == end_message.id
+                        and interaction.message.id == end_msg.id
                         and interaction.data.get("custom_id") == "replay_game"
                     )
 
@@ -753,18 +632,19 @@ class GuessCharacter(commands.Cog):
                     interaction = await self.bot.wait_for(
                         "interaction", timeout=30.0, check=check_interaction
                     )
+                    # Si l’utilisateur clique sur “Rejouer”
                     if interaction.data.get("custom_id") == "replay_game":
                         await interaction.response.defer()
-                        deletion_task_defeat.cancel()  # Annule la suppression après 30 s
-                        reset_inactivity_timer()      # Réinitialise le timer d’inactivité 15 min
-                        continue  # Relance la boucle principale pour une nouvelle partie
+                        deletion_task_defeat.cancel()  # On annule la suppression après 30 s
+                        reset_inactivity_timer()       # On remet 15 min d’inactivité
+                        continue  # Retour à la boucle principale pour créer une nouvelle partie
                 except asyncio.TimeoutError:
-                    # Si 30 s s'écoulent, delete_after_30s() supprimera déjà le salon
+                    # Si 30 s passent sans clic, delete_after_30s() supprime le salon
                     return
 
-            # ───────────────────────────────────────────────────────────────────────────
+            # ────────────────────────────────────────────────────────────
             # Si on atteint ici, c’est qu’on a demandé “Rejouer” dans l’une des conditions
-            # Annulation du timer de 3 minutes en cours et on relance la boucle principale
+            # Annule le timer de 3 minutes en cours et on relance la boucle principale
             try:
                 timeout_task.cancel()
             except:
