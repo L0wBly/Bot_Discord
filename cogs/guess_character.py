@@ -107,7 +107,6 @@ class GuessCharacter(commands.Cog):
             asyncio.create_task(self.delete_message_after(err, 5))
             return
 
-        # ───────────────────────────────────────────────────────────────────────────
         # 7) Dans le salon public, on propose un bouton “Ouvrir le salon”
         channel_url = f"https://discord.com/channels/{guild.id}/{game_channel.id}"
 
@@ -132,7 +131,6 @@ class GuessCharacter(commands.Cog):
         # 8) Message de bienvenue dans le salon privé
         await game_channel.send(f"{ctx.author.mention}, bienvenue dans votre salon de jeu ! Lancez vos tentatives ici.")
 
-        # ───────────────────────────────────────────────────────────────────────────
         # Fonction interne pour choisir un nouveau personnage aléatoire
         def choose_new_character():
             perso = random.choice(self.personnages)
@@ -514,10 +512,10 @@ class GuessCharacter(commands.Cog):
                         if interaction.data.get("custom_id") == "replay_game":
                             await interaction.response.defer()
                             deletion_task.cancel()      # Annule la suppression après 30 s
-                            reset_inactivity_timer()   # On réinitialise le timer d’inactivité 15 min
+                            reset_inactivity_timer()   # Réinitialise le timer d’inactivité 15 min
                             return  # La boucle principale relancera une nouvelle partie
                     except asyncio.TimeoutError:
-                        # Si 30 s s’écoulent, delete_after_30s() supprimera déjà le salon
+                        # Si 30 s s'écoulent, delete_after_30s() supprimera déjà le salon
                         return
 
             # ───────────────────────────────────────────────────────────────────────────
