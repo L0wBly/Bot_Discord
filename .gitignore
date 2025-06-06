@@ -5,5 +5,5 @@ data/*.json
 !bump_status.json
 __pycache__/
 anime_people.py
-création_list_personnage/data/classement_anime.txt 
-création_list_personnage/data/classement_manga.txt
+guess_character/data/classement_anime.txt 
+guess_character/data/classement_manga.txt
