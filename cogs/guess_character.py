@@ -1,4 +1,3 @@
-# cogs/guess_character.py
 
 import json
 import os
