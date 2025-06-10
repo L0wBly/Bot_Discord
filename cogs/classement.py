@@ -1,25 +1,18 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 from collections import defaultdict, Counter
 import asyncio
 
-from config import EXCLUDED_CHANNEL_IDS  # à définir, liste d'IDs de salons à exclure
+from config import EXCLUDED_CHANNEL_IDS  # à définir dans config.py
 from utils.logger import logger
 
 class Classement(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # À remplacer par stockage persistant si besoin !
-        self.guess_scores = Counter()     # {user_id: int}
-        self.message_counts = Counter()   # {user_id: int}
+        self.guess_scores = Counter()      # {user_id: int}
+        self.message_counts = Counter()    # {user_id: int}
         self.voice_times = defaultdict(int)  # {user_id: secondes}
-
-        self.voice_states = {}  # {user_id: timestamp entrée vocal}
-
-    async def setup_hook(self):
-        # Chargement des données persistantes ici (à compléter)
-        pass
+        self.voice_states = {}             # {user_id: timestamp entrée vocal}
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -46,37 +39,21 @@ class Classement(commands.Cog):
     def add_guess_win(self, user_id):
         self.guess_scores[user_id] += 1
 
-    # Commande principale
     @commands.command(name="classement", help="Affiche le classement général")
     async def classement(self, ctx):
-        class SelectClassement(discord.ui.Select):
-            def __init__(self, outer):
-                options = [
-                    discord.SelectOption(label="Messages", value="messages", description="Classement des messages"),
-                    discord.SelectOption(label="Vocal", value="vocal", description="Classement temps vocal"),
-                    discord.SelectOption(label="Guess", value="guess", description="Classement jeu !guess"),
-                ]
-                super().__init__(placeholder="Choisis une catégorie", min_values=1, max_values=1, options=options)
-                self.outer = outer
+        """Affiche le classement avec menu déroulant et suppression auto après 3min."""
+        view = ClassementView(self, ctx.guild)
+        message = await ctx.send("Sélectionne une catégorie de classement :", view=view)
 
-            async def callback(self, interaction: discord.Interaction):
-                value = self.values[0]
-                if value == "messages":
-                    await interaction.response.edit_message(embed=self.outer.get_classement_embed(ctx.guild, "messages"))
-                elif value == "vocal":
-                    await interaction.response.edit_message(embed=self.outer.get_classement_embed(ctx.guild, "vocal"))
-                elif value == "guess":
-                    await interaction.response.edit_message(embed=self.outer.get_classement_embed(ctx.guild, "guess"))
+        # Suppression auto après 3min (180s)
+        async def auto_delete():
+            await asyncio.sleep(180)
+            try:
+                await message.delete()
+            except Exception:
+                pass
 
-        class ClassementView(discord.ui.View):
-            def __init__(self, outer):
-                super().__init__(timeout=60)
-                self.add_item(SelectClassement(outer))
-
-        await ctx.send(
-            "Sélectionne une catégorie de classement :",
-            view=ClassementView(self)
-        )
+        ctx.bot.loop.create_task(auto_delete())
 
     def get_classement_embed(self, guild, category):
         if category == "messages":
@@ -92,7 +69,7 @@ class Classement(commands.Cog):
             title = "🎮 Classement !guess"
             desc = "Score du mini-jeu !guess"
 
-        # Top 10 uniquement
+        # Top 10
         top = counts.most_common(10)
         embed = discord.Embed(title=title, description=desc, color=0x7289da)
         for i, (user_id, score) in enumerate(top, 1):
@@ -110,6 +87,30 @@ class Classement(commands.Cog):
         if not top:
             embed.description = "Pas encore de données."
         return embed
+
+class ClassementView(discord.ui.View):
+    def __init__(self, cog, guild):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.guild = guild
+        self.add_item(ClassementSelect(cog, guild, self))
+
+class ClassementSelect(discord.ui.Select):
+    def __init__(self, cog, guild, view):
+        options = [
+            discord.SelectOption(label="Messages", value="messages", description="Classement des messages"),
+            discord.SelectOption(label="Vocal", value="vocal", description="Classement temps vocal"),
+            discord.SelectOption(label="Guess", value="guess", description="Classement jeu !guess"),
+        ]
+        super().__init__(placeholder="Choisis une catégorie", min_values=1, max_values=1, options=options)
+        self.cog = cog
+        self.guild = guild
+        self.parent_view = view
+
+    async def callback(self, interaction: discord.Interaction):
+        category = self.values[0]
+        embed = self.cog.get_classement_embed(self.guild, category)
+        await interaction.response.edit_message(embed=embed, view=self.parent_view)
 
 async def setup(bot):
     await bot.add_cog(Classement(bot))
