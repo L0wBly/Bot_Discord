@@ -10,14 +10,12 @@ from utils.logger import logger  # Votre logger perso (dans utils/logger.py)
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# ───> 1) On crée le Bot en désactivant la help intégrée
+# ─── 1) Création du bot avec tous les intents
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-# Même si help_command=None, on appelle remove_command("help") juste après
-# pour être sûr qu'aucune commande "help" existante ne subsiste.
+# Supprime la commande "help" par défaut
 bot.remove_command("help")
-
 
 async def load_cogs():
     """
@@ -38,43 +36,35 @@ async def load_cogs():
         except Exception as e:
             logger.error(f"❌ Erreur au chargement du cog {ext} : {e}")
 
-
 @bot.event
 async def on_ready():
     logger.info(f"🤖 {bot.user} est connecté et prêt !")
 
-
 # ───────────────────────────────────────────────────────────────────
-# NOUVEAU : on intercepte tous les messages pour filtrer "!help" avant que
-# Discord.py n'appelle automatiquement sa help par défaut.
+# Intercepte tous les messages pour filtrer "!help"
 @bot.event
 async def on_message(message: discord.Message):
-    # Si le message vient d’un bot, on ne fait rien.
     if message.author.bot:
         return
 
     contenu = message.content.strip()
-    # Si le message commence précisément par "!help" ou "!help " (avec un espace),
-    # on récupère le context et on invoque la commande personnalisée "help"
+    # Si le message commence par "!help", utilise ta commande help personnalisée
     if contenu.startswith("!help"):
         ctx = await bot.get_context(message)
-        cmd = bot.get_command("help")    # c’est la méthode help_all dans help_cog.py
+        cmd = bot.get_command("help")    # méthode help_all dans help_cog.py si tu l’as
         if cmd:
-            # On invoque explicitement notre commande help personnalisée
             await ctx.invoke(cmd)
             return
 
-    # Sinon, on laisse Discord.py traiter normalement les autres commandes
+    # Sinon, laisse Discord.py traiter normalement
     await bot.process_commands(message)
 # ───────────────────────────────────────────────────────────────────
 
-
 async def main():
-    # 1. Charger tous les cogs avant de démarrer le bot
+    # Charger tous les cogs avant de démarrer le bot
     await load_cogs()
-    # 2. Lancer le bot
+    # Démarrer le bot
     await bot.start(TOKEN)
-
 
 if __name__ == "__main__":
     import asyncio

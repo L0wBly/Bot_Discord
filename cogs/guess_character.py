@@ -8,7 +8,7 @@ import discord
 from discord.ext import commands
 
 from utils.logger import logger
-from config import GUESS_CHANNEL_ID, GAME_CATEGORY_ID
+from config import GUESS_CHANNEL_ID, GAME_CATEGORY_ID, EXCLUDED_CHANNEL_IDS
 
 creation_locks = defaultdict(asyncio.Lock)
 active_guess_ctx = set()
@@ -126,6 +126,9 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                         reason=f"Salon privé GuessCharacter pour {ctx.author}",
                         topic=f"{PLAYER_MARKER}{ctx.author.id}"
                     )
+                    # ==> AJOUTE CETTE LIGNE pour exclure le salon du classement messages :
+                    if game_channel.id not in EXCLUDED_CHANNEL_IDS:
+                        EXCLUDED_CHANNEL_IDS.append(game_channel.id)
                 except Exception as e:
                     logger.error(f"[GuessCharacter] Impossible de créer le salon privé pour {ctx.author} : {e}")
                     err = await ctx.send("⚠️ Une erreur est survenue lors de la création du salon privé.")
@@ -404,6 +407,15 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                                 found = True
                                 attempts += 1
                                 rest = max_attempts - attempts
+
+                                # ==== AJOUT DU SCORE AU CLASSEMENT ! ====
+                                try:
+                                    classement_cog = self.bot.get_cog("Classement")
+                                    if classement_cog:
+                                        classement_cog.add_guess_win(ctx.author.id)
+                                except Exception as e:
+                                    logger.error(f"Erreur en ajoutant le score guess au classement: {e}")
+
                                 success_embed = discord.Embed(
                                     title="✅ Bravo !",
                                     description=f"{user_msg.author.mention}, c’était bien **{full_name}** de *{anime}* !",
