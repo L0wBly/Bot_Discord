@@ -52,7 +52,6 @@ async def on_message(message: discord.Message):
 
 async def main():
     await load_cogs()
-    print(">>> BIENTÔT BOT START !")
     await bot.start(TOKEN)
 
 if __name__ == "__main__":

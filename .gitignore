@@ -1,8 +1,6 @@
 *.pyc
 logs/
 .env
-data/*.json
-!bump_status.json
 __pycache__/
 anime_people.py
 guess_character/data/classement_anime.txt 

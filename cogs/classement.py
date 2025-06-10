@@ -2,28 +2,60 @@ import discord
 from discord.ext import commands
 from collections import defaultdict, Counter
 import asyncio
+import os
+import json
 
-from config import EXCLUDED_CHANNEL_IDS  # à définir dans config.py
+from config import EXCLUDED_CHANNEL_IDS
 from utils.logger import logger
+
+DATA_PATH = "data/classement.json"
 
 class Classement(commands.Cog):
     def __init__(self, bot):
-        print(">>> CLASSEMENT COG CHARGÉ (Fichier : classement.py)")
         self.bot = bot
         self.guess_scores = Counter()
         self.message_counts = Counter()
         self.voice_times = defaultdict(int)
         self.voice_states = {}
 
+        self.load_scores()
+
+    # ---------- Sauvegarde & Chargement ----------
+    def save_scores(self):
+        data = {
+            "messages": dict(self.message_counts),
+            "vocal": dict(self.voice_times),
+            "guess": dict(self.guess_scores)
+        }
+        os.makedirs("data", exist_ok=True)
+        try:
+            with open(DATA_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except Exception as e:
+            logger.error(f"[Classement] Erreur sauvegarde : {e}")
+
+    def load_scores(self):
+        try:
+            if not os.path.exists(DATA_PATH):
+                return
+            with open(DATA_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.message_counts = Counter({int(k): v for k, v in data.get("messages", {}).items()})
+            self.voice_times = defaultdict(int, {int(k): v for k, v in data.get("vocal", {}).items()})
+            self.guess_scores = Counter({int(k): v for k, v in data.get("guess", {}).items()})
+        except Exception as e:
+            logger.error(f"[Classement] Erreur chargement : {e}")
+
+    # ---------- Listeners ----------
     @commands.Cog.listener()
     async def on_message(self, message):
-        # On enregistre le message UNIQUEMENT, pas de process_commands ici !
         if (
             not message.author.bot and
             message.guild and
             message.channel.id not in EXCLUDED_CHANNEL_IDS
         ):
             self.message_counts[message.author.id] += 1
+            self.save_scores()
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -37,20 +69,22 @@ class Classement(commands.Cog):
                 if start:
                     duration = int(asyncio.get_event_loop().time() - start)
                     self.voice_times[member.id] += duration
+                    self.save_scores()
         except Exception as e:
             logger.error(f"[Classement] Erreur dans on_voice_state_update : {e}")
 
     def add_guess_win(self, user_id):
         self.guess_scores[user_id] += 1
+        self.save_scores()
 
+    # ---------- Commande Classement ----------
     @commands.command(name="classement", help="Affiche le classement général")
     async def classement(self, ctx):
-        print(">>> EXECUTION commande !classement")
         try:
             view = ClassementView(self, ctx.guild)
             message = await ctx.send("**Sélectionne une catégorie de classement :**", view=view)
-            
-            # Supprime le message de commande après 3 secondes
+
+            # Supprime la commande utilisateur après 3 sec
             async def delete_user_command():
                 await asyncio.sleep(3)
                 try:
@@ -58,7 +92,7 @@ class Classement(commands.Cog):
                 except Exception:
                     pass
 
-            # Suppression auto après 3min (180s)
+            # Suppression auto du menu après 3min
             async def auto_delete():
                 await asyncio.sleep(180)
                 try:
@@ -68,9 +102,10 @@ class Classement(commands.Cog):
             ctx.bot.loop.create_task(auto_delete())
             ctx.bot.loop.create_task(delete_user_command())
         except Exception as e:
-            print(f"[Classement] Erreur lors de l'affichage du classement : {e}")
+            logger.error(f"[Classement] Erreur affichage du classement : {e}")
             await ctx.send("Erreur lors de l’affichage du classement.")
 
+    # ---------- Génération de l'embed ----------
     def get_classement_embed(self, guild, category):
         try:
             if category == "messages":
@@ -78,7 +113,7 @@ class Classement(commands.Cog):
                 title = "🏆 Classement Messages"
                 desc = "Les membres les plus bavards !"
             elif category == "vocal":
-                counts = Counter(self.voice_times)  # Correction ICI
+                counts = Counter(self.voice_times)
                 title = "🎙️ Classement Vocal"
                 desc = "Ceux qui squattent le plus les vocaux !"
             else:  # guess
@@ -86,7 +121,6 @@ class Classement(commands.Cog):
                 title = "🎮 Classement !guess"
                 desc = "Score du mini-jeu !guess"
 
-            # Top 10
             top = counts.most_common(10)
             embed = discord.Embed(title=title, description=desc, color=0x7289da)
             for i, (user_id, score) in enumerate(top, 1):
@@ -105,7 +139,6 @@ class Classement(commands.Cog):
                 embed.description = "Pas encore de données."
             return embed
         except Exception as e:
-            # Log et retourne une embed d’erreur
             logger.error(f"[Classement] Erreur dans get_classement_embed : {e}")
             embed = discord.Embed(
                 title="Erreur",
@@ -114,6 +147,7 @@ class Classement(commands.Cog):
             )
             return embed
 
+# ---------- UI Discord ----------
 class ClassementView(discord.ui.View):
     def __init__(self, cog, guild):
         super().__init__(timeout=180)
@@ -135,13 +169,11 @@ class ClassementSelect(discord.ui.Select):
         self.parent_view = view
 
     async def callback(self, interaction: discord.Interaction):
-        print(f"[Classement] Interaction menu par {interaction.user} : {self.values}")
         try:
             category = self.values[0]
             embed = self.cog.get_classement_embed(self.guild, category)
             await interaction.response.edit_message(embed=embed, view=self.parent_view)
         except Exception as e:
-            print("Erreur dans le callback du classement :", e)
             try:
                 await interaction.response.send_message(
                     "Une erreur est survenue lors de l’affichage du classement. Contacte un admin.",
