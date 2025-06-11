@@ -1,3 +1,5 @@
+# cogs/help_cog.py
+
 import asyncio
 import discord
 from discord.ext import commands
@@ -9,120 +11,149 @@ from config import (
 )
 
 class HelpCog(commands.Cog):
+    """Cog exposant 4 commandes : help/helpadmin/helpjeu/helpjeuadmin."""
+
     def __init__(self, bot):
         self.bot = bot
         self.general_commands = {
             "help": "Affiche toutes les commandes générales du serveur.",
-            "classement": "Affiche le classement des messages, voice et de guess.."
+            "classement": "Affiche tous les classements sur le serveur.",
         }
         self.jeu_commands = {
             "helpjeu": "Affiche les commandes liées au jeu.",
             "guess":   "Permet de deviner un personnage (jeu GuessCharacter)."
         }
 
-    async def handle_help_command(self, message: discord.Message):
-        # IGNORE les bots
-        if message.author.bot:
-            return False
+    def _has_role(self, ctx):
+        return any(r.id == HELPER_ROLE_ID for r in ctx.author.roles)
 
-        content = message.content.strip().lower()
-        channel_id = message.channel.id
-        author = message.author
-
-        if content in ("!help", "!helpadmin", "!helpjeu", "!helpjeuadmin"):
-            has_helper_role = any(role.id == HELPER_ROLE_ID for role in author.roles)
-            if not has_helper_role:
-                asyncio.create_task(self._delete_after(message, 2))
-                err = await message.channel.send(
-                    f"⚠️ Vous devez avoir le rôle <@&{HELPER_ROLE_ID}> pour utiliser cette commande."
-                )
-                asyncio.create_task(self._delete_after(err, 5))
-                return True
-
-        if content == "!helpadmin":
-            asyncio.create_task(self._delete_after(message, 2))
-            if channel_id != HELP_CHANNEL_ID:
-                err = await message.channel.send(
-                    "⚠️ La commande `!helpadmin` n'est autorisée que dans #commandes."
-                )
-                asyncio.create_task(self._delete_after(err, 5))
-                return True
-            embed = discord.Embed(
-                title="📜 Commandes disponibles",
-                description="Voici la liste des commandes **générales** disponibles :",
-                color=discord.Color.blue()
-            )
-            for cmd_name, desc in self.general_commands.items():
-                embed.add_field(name=f"`!{cmd_name}`", value=desc, inline=False)
-            embed.set_footer(text="Tapez `!helpjeu` dans #jeu pour les commandes de jeu.")
-            await message.channel.send(embed=embed)
-            return True
-
-        if content == "!help":
-            asyncio.create_task(self._delete_after(message, 2))
-            if channel_id != HELP_CHANNEL_ID:
-                err = await message.channel.send(
-                    "⚠️ La commande `!help` n'est autorisée que dans #commandes."
-                )
-                asyncio.create_task(self._delete_after(err, 5))
-                return True
-            embed = discord.Embed(
-                title="📜 Commandes disponibles",
-                description="Voici la liste des commandes **générales** disponibles :",
-                color=discord.Color.blue()
-            )
-            for cmd_name, desc in self.general_commands.items():
-                embed.add_field(name=f"`!{cmd_name}`", value=desc, inline=False)
-            embed.set_footer(text="Tapez `!helpjeu` dans #jeu pour les commandes de jeu.")
-            sent_embed = await message.channel.send(embed=embed)
-            asyncio.create_task(self._delete_after(sent_embed, 60))
-            return True
-
-        if content == "!helpjeuadmin":
-            asyncio.create_task(self._delete_after(message, 2))
-            if channel_id != HELPJEU_CHANNEL_ID:
-                err = await message.channel.send(
-                    "⚠️ La commande `!helpjeuadmin` n'est autorisée que dans #jeu."
-                )
-                asyncio.create_task(self._delete_after(err, 5))
-                return True
-            embed = discord.Embed(
-                title="🎮 Commandes liées au jeu",
-                description="Voici la liste des commandes **liées au jeu** disponibles :",
-                color=discord.Color.green()
-            )
-            for cmd_name, desc in self.jeu_commands.items():
-                embed.add_field(name=f"`!{cmd_name}`", value=desc, inline=False)
-            await message.channel.send(embed=embed)
-            return True
-
-        if content == "!helpjeu":
-            asyncio.create_task(self._delete_after(message, 2))
-            if channel_id != HELPJEU_CHANNEL_ID:
-                err = await message.channel.send(
-                    "⚠️ La commande `!helpjeu` n'est autorisée que dans #jeu."
-                )
-                asyncio.create_task(self._delete_after(err, 5))
-                return True
-            embed = discord.Embed(
-                title="🎮 Commandes liées au jeu",
-                description="Voici la liste des commandes **liées au jeu** disponibles :",
-                color=discord.Color.green()
-            )
-            for cmd_name, desc in self.jeu_commands.items():
-                embed.add_field(name=f"`!{cmd_name}`", value=desc, inline=False)
-            sent_embed = await message.channel.send(embed=embed)
-            asyncio.create_task(self._delete_after(sent_embed, 60))
-            return True
-
-        return False
-
-    async def _delete_after(self, message: discord.Message, delay: float):
+    async def _delete_after(self, msg, delay):
         await asyncio.sleep(delay)
         try:
-            await message.delete()
-        except Exception:
+            await msg.delete()
+        except:
             pass
 
-async def setup(bot):
+    # ─────────────────────────────────────────────────────────────────────────
+    @commands.command(name="helpadmin")
+    async def help_admin(self, ctx):
+        """!helpadmin (admin only) — liste des commandes générales, embed persistant."""
+        # Permission
+        if not self._has_role(ctx):
+            await self._delete_after(await ctx.message.delete(), 0)
+            err = await ctx.send(f"⚠️ Rôle requis : <@&{HELPER_ROLE_ID}>")
+            return await self._delete_after(err, 5)
+
+        # Canal
+        if ctx.channel.id != HELP_CHANNEL_ID:
+            err = await ctx.send("⚠️ `!helpadmin` réservé au salon #commandes.")
+            return await self._delete_after(err, 5)
+
+        # Embed
+        embed = discord.Embed(
+            title="📜 Commandes générales (admin)",
+            color=discord.Color.blue()
+        )
+        for cmd, desc in self.general_commands.items():
+            embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
+
+        await ctx.send(embed=embed)
+        # pas de suppression de l’embed
+
+    # ─────────────────────────────────────────────────────────────────────────
+    @commands.command(name="help")
+    async def help_user(self, ctx):
+        """!help — liste des commandes générales, embed auto-supprimé."""
+        # Permission
+        if not self._has_role(ctx):
+            await self._delete_after(await ctx.message.delete(), 0)
+            err = await ctx.send(f"⚠️ Rôle requis : <@&{HELPER_ROLE_ID}>")
+            return await self._delete_after(err, 5)
+
+        # Canal
+        if ctx.channel.id != HELP_CHANNEL_ID:
+            await self._delete_after(ctx.message, 2)
+            err = await ctx.send("⚠️ `!help` réservé au salon #commandes.")
+            return await self._delete_after(err, 5)
+
+        # Suppression commande après 2s
+        asyncio.create_task(self._delete_after(ctx.message, 2))
+
+        # Embed
+        embed = discord.Embed(
+            title="📜 Commandes générales",
+            description="Liste des commandes :",
+            color=discord.Color.blue()
+        )
+        for cmd, desc in self.general_commands.items():
+            embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
+        embed.set_footer(text="Tapez `!helpjeu` dans #jeu pour les commandes de jeu.")
+
+        sent = await ctx.send(embed=embed)
+        # Suppression embed après 60s
+        return await self._delete_after(sent, 60)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    @commands.command(name="helpjeuadmin")
+    async def help_jeu_admin(self, ctx):
+        """!helpjeuadmin (admin only) — liste des commandes de jeu, embed persistant."""
+        # Permission
+        if not self._has_role(ctx):
+            await self._delete_after(await ctx.message.delete(), 0)
+            err = await ctx.send(f"⚠️ Rôle requis : <@&{HELPER_ROLE_ID}>")
+            return await self._delete_after(err, 5)
+
+        # Canal
+        if ctx.channel.id != HELPJEU_CHANNEL_ID:
+            err = await ctx.send("⚠️ `!helpjeuadmin` réservé au salon #jeu.")
+            return await self._delete_after(err, 5)
+
+        # Supprimer commande après 2s
+        asyncio.create_task(self._delete_after(ctx.message, 2))
+
+        # Embed
+        embed = discord.Embed(
+            title="🎮 Commandes de jeu (admin)",
+            description="Liste des commandes de jeu :",
+            color=discord.Color.green()
+        )
+        for cmd, desc in self.jeu_commands.items():
+            embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
+
+        await ctx.send(embed=embed)
+        # pas de suppression de l’embed
+
+    # ─────────────────────────────────────────────────────────────────────────
+    @commands.command(name="helpjeu")
+    async def help_jeu_user(self, ctx):
+        """!helpjeu — liste des commandes de jeu, embed auto-supprimé."""
+        # Permission
+        if not self._has_role(ctx):
+            await self._delete_after(await ctx.message.delete(), 0)
+            err = await ctx.send(f"⚠️ Rôle requis : <@&{HELPER_ROLE_ID}>")
+            return await self._delete_after(err, 5)
+
+        # Canal
+        if ctx.channel.id != HELPJEU_CHANNEL_ID:
+            await self._delete_after(ctx.message, 2)
+            err = await ctx.send("⚠️ `!helpjeu` réservé au salon #jeu.")
+            return await self._delete_after(err, 5)
+
+        # Suppression commande après 2s
+        asyncio.create_task(self._delete_after(ctx.message, 2))
+
+        # Embed
+        embed = discord.Embed(
+            title="🎮 Commandes de jeu",
+            description="Liste des commandes de jeu :",
+            color=discord.Color.green()
+        )
+        for cmd, desc in self.jeu_commands.items():
+            embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
+
+        sent = await ctx.send(embed=embed)
+        # Suppression embed après 60s
+        return await self._delete_after(sent, 60)
+
+async def setup(bot: commands.Bot):
     await bot.add_cog(HelpCog(bot))
