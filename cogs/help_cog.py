@@ -12,7 +12,8 @@ class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.general_commands = {
-            "help": "Affiche toutes les commandes générales du serveur."
+            "help": "Affiche toutes les commandes générales du serveur.",
+            "classement": "Affiche le classement des messages, voice et de guess.."
         }
         self.jeu_commands = {
             "helpjeu": "Affiche les commandes liées au jeu.",
