@@ -43,7 +43,6 @@ class GuessCharacter(commands.Cog, name="Jeu"):
             pass
 
     def find_existing_private_channel(self, guild, user_id):
-        """Cherche un salon privé du jeu dans la bonne catégorie dont le topic contient l'ID du joueur."""
         for channel in guild.text_channels:
             if (
                 channel.category_id == GAME_CATEGORY_ID
@@ -79,7 +78,6 @@ class GuessCharacter(commands.Cog, name="Jeu"):
 
             lock = creation_locks[ctx.author.id]
             async with lock:
-                # Détection FIABLE : topic du channel contient player_id
                 existing_channel = self.find_existing_private_channel(guild, ctx.author.id)
 
                 if existing_channel is not None:
@@ -126,7 +124,6 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                         reason=f"Salon privé GuessCharacter pour {ctx.author}",
                         topic=f"{PLAYER_MARKER}{ctx.author.id}"
                     )
-                    # ==> AJOUTE CETTE LIGNE pour exclure le salon du classement messages :
                     if game_channel.id not in EXCLUDED_CHANNEL_IDS:
                         EXCLUDED_CHANNEL_IDS.append(game_channel.id)
                 except Exception as e:
@@ -156,52 +153,26 @@ class GuessCharacter(commands.Cog, name="Jeu"):
 
                 await game_channel.send(f"{ctx.author.mention}, bienvenue dans votre salon ! Laissez vos tentatives ici.")
 
-                # ========== BOUCLE DE JEU COMPLÈTE ==========
-                def choose_new_character():
-                    perso = random.choice(self.personnages)
-                    p_prenom = perso.get("prenom", "").strip()
-                    p_nom = perso.get("nom", "").strip()
-                    p_anime = perso.get("title", "Inconnu").strip()
-                    p_image = perso.get("image", None)
-                    p_full = f"{p_prenom} {p_nom}".strip()
-                    p_valids = {p_prenom.lower(), p_nom.lower(), p_full.lower()}
-                    return {
-                        "prenom": p_prenom,
-                        "nom": p_nom,
-                        "anime": p_anime,
-                        "image": p_image,
-                        "full_name": p_full,
-                        "valids": p_valids
-                    }
-
-                class EndGameView(discord.ui.View):
-                    def __init__(self):
-                        super().__init__(timeout=None)
-                        self.add_item(
-                            discord.ui.Button(
-                                label="🔄 Rejouer",
-                                style=discord.ButtonStyle.primary,
-                                custom_id="replay_game"
-                            )
-                        )
-
-                inactivity_task = None
-                async def schedule_inactivity_deletion():
-                    await asyncio.sleep(15 * 60)
-                    try:
-                        await game_channel.delete()
-                    except:
-                        pass
-                def reset_inactivity_timer():
-                    nonlocal inactivity_task
-                    if inactivity_task and not inactivity_task.done():
-                        inactivity_task.cancel()
-                    inactivity_task = asyncio.create_task(schedule_inactivity_deletion())
-
-                reset_inactivity_timer()
-
+                # BOUCLE PRINCIPALE DU JEU
                 while True:
-                    wait_message_task = None
+                    # 1. Sélection du personnage
+                    def choose_new_character():
+                        perso = random.choice(self.personnages)
+                        p_prenom = perso.get("prenom", "").strip()
+                        p_nom = perso.get("nom", "").strip()
+                        p_anime = perso.get("title", "Inconnu").strip()
+                        p_image = perso.get("image", None)
+                        p_full = f"{p_prenom} {p_nom}".strip()
+                        p_valids = {p_prenom.lower(), p_nom.lower(), p_full.lower()}
+                        return {
+                            "prenom": p_prenom,
+                            "nom": p_nom,
+                            "anime": p_anime,
+                            "image": p_image,
+                            "full_name": p_full,
+                            "valids": p_valids
+                        }
+
                     char_data = choose_new_character()
                     prenom = char_data["prenom"]
                     nom = char_data["nom"]
@@ -210,30 +181,40 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                     full_name = char_data["full_name"]
                     noms_valides = char_data["valids"]
 
-                    logger.info(f"[GuessCharacter] {ctx.author} → personnage choisi : {full_name} ({anime})")
-
                     attempts = 0
                     max_attempts = 10
                     found = False
                     abandoned = False
                     hint_level = 0
+                    inactivity_task = None
+
+                    async def schedule_inactivity_deletion():
+                        await asyncio.sleep(15 * 60)
+                        try:
+                            await game_channel.delete()
+                        except:
+                            pass
+                    def reset_inactivity_timer():
+                        nonlocal inactivity_task
+                        if inactivity_task and not inactivity_task.done():
+                            inactivity_task.cancel()
+                        inactivity_task = asyncio.create_task(schedule_inactivity_deletion())
+
+                    reset_inactivity_timer()
 
                     timeout_task = None
+                    wait_message_task = None
+
                     async def single_timeout():
                         nonlocal attempts, abandoned, found, timeout_task
                         try:
                             await asyncio.sleep(180)
                             if not found and not abandoned:
                                 abandoned = True
-                                logger.info(
-                                    f"[GuessCharacter] Temps écoulé (3m sans action) pour {ctx.author} dans le salon {game_channel.id}."
-                                )
                                 timeout_embed = discord.Embed(
                                     title="⏲️ Temps écoulé !",
-                                    description=(
-                                        f"Le temps de 3 minutes sans interaction est écoulé.\n"
-                                        f"La réponse était **{full_name}** de *{anime}*."
-                                    ),
+                                    description=(f"Le temps de 3 minutes sans interaction est écoulé.\n"
+                                                 f"La réponse était **{full_name}** de *{anime}*."),
                                     color=0xe67e22
                                 )
                                 if image_url:
@@ -241,7 +222,6 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                                 timeout_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
                                 view_end = EndGameView()
                                 end_msg = await game_channel.send(embed=timeout_embed, view=view_end)
-                                await asyncio.sleep(0.1)
                                 try:
                                     if view_skip.main_embed_msg:
                                         await view_skip.main_embed_msg.delete()
@@ -249,11 +229,21 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                                     pass
                                 if wait_message_task and not wait_message_task.done():
                                     wait_message_task.cancel()
-                                return
                         except asyncio.CancelledError:
                             return
 
                     timeout_task = asyncio.create_task(single_timeout())
+
+                    class EndGameView(discord.ui.View):
+                        def __init__(self):
+                            super().__init__(timeout=None)
+                            self.add_item(
+                                discord.ui.Button(
+                                    label="🔄 Rejouer",
+                                    style=discord.ButtonStyle.primary,
+                                    custom_id="replay_game"
+                                )
+                            )
 
                     class SkipView(discord.ui.View):
                         def __init__(self):
@@ -391,6 +381,7 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                     def check_msg(m: discord.Message):
                         return m.channel == game_channel and m.author.id == ctx.author.id and not m.author.bot
 
+                    # ---- JEU (phase des tentatives) ----
                     while attempts < max_attempts and not abandoned and not found:
                         try:
                             wait_message_task = asyncio.create_task(self.bot.wait_for("message", check=check_msg))
@@ -425,9 +416,7 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                                 success_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
                                 success_embed.add_field(name="Tentatives restantes", value=str(rest), inline=True)
                                 timeout_task.cancel()
-                                view_end = EndGameView()
                                 end_msg = await game_channel.send(embed=success_embed, view=view_end)
-                                logger.info(f"[GuessCharacter] {user_msg.author} a trouvé {full_name} en {attempts} tentative(s).")
                                 try:
                                     view_skip.children[0].disabled = True
                                     view_skip.children[1].disabled = True
@@ -441,31 +430,19 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                                         await view_skip.main_embed_msg.delete()
                                 except:
                                     pass
-                                async def delete_after_30s():
-                                    await asyncio.sleep(30.0)
+
+                                # --------- Attente bouton "Rejouer" ----------
+                                restart_game = await self.wait_for_replay_button(game_channel, ctx, end_msg)
+                                if restart_game:
+                                    break  # Recommencer une partie (sort du while attempts, re-rentre dans while True)
+                                else:
+                                    # pas de replay, fermeture du salon
+                                    await asyncio.sleep(30)
                                     try:
                                         await game_channel.delete()
                                     except:
                                         pass
-                                deletion_task = asyncio.create_task(delete_after_30s())
-                                def check_interaction(interaction: discord.Interaction):
-                                    return (
-                                        interaction.user.id == ctx.author.id
-                                        and interaction.message.id == end_msg.id
-                                        and interaction.data.get("custom_id") == "replay_game"
-                                    )
-                                try:
-                                    interaction = await self.bot.wait_for(
-                                        "interaction", timeout=30.0, check=check_interaction
-                                    )
-                                    if interaction.data.get("custom_id") == "replay_game":
-                                        await interaction.response.defer()
-                                        deletion_task.cancel()
-                                        reset_inactivity_timer()
-                                        break
-                                except asyncio.TimeoutError:
                                     return
-                                continue
                             attempts += 1
                             rest = max_attempts - attempts
                             if hint_level > 0:
@@ -496,28 +473,40 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                                         hint_level = 2
                                     hint_embed = view_skip.build_hint_embed(hint_level, rest)
                                     await view_skip.main_embed_msg.edit(embed=hint_embed, view=view_skip)
-                            logger.info(f"[GuessCharacter] {user_msg.author} a tenté «{user_msg.content}», incorrect ({attempts}/10).")
-                            if attempts >= max_attempts:
-                                break
                         except asyncio.CancelledError:
                             break
 
                     timeout_task.cancel()
 
+                    # ----- ABANDON/ECHEC -----
                     if abandoned and not found:
                         abandon_embed = discord.Embed(
                             title="🔚 Partie abandonnée",
-                            description=(
-                                f"⚠️ Vous avez cliqué sur **Abandonner**.\n"
-                                f"La réponse était **{full_name}** de *{anime}*."
-                            ),
+                            description=(f"⚠️ Vous avez cliqué sur **Abandonner**.\n"
+                                         f"La réponse était **{full_name}** de *{anime}*."),
                             color=0xe67e22
                         )
                         if image_url:
                             abandon_embed.set_thumbnail(url=image_url)
                         abandon_embed.add_field(name="Tentatives utilisées", value=str(attempts), inline=True)
-                        view_end = EndGameView()
                         end_msg = await game_channel.send(embed=abandon_embed, view=view_end)
+                        try:
+                            view_skip.children[0].disabled = True
+                            view_skip.children[1].disabled = True
+                            view_skip.children[2].disabled = True
+                            await view_skip.main_embed_msg.edit(view=view_skip)
+                        except:
+                            pass
+                        restart_game = await self.wait_for_replay_button(game_channel, ctx, end_msg)
+                        if restart_game:
+                            continue
+                        else:
+                            await asyncio.sleep(30)
+                            try:
+                                await game_channel.delete()
+                            except:
+                                pass
+                            return
 
                     elif not found and not abandoned:
                         defeat_embed = discord.Embed(
@@ -527,46 +516,50 @@ class GuessCharacter(commands.Cog, name="Jeu"):
                         )
                         defeat_embed.set_thumbnail(url=image_url or "")
                         defeat_embed.add_field(name="Tentatives utilisées", value=str(max_attempts), inline=True)
-                        view_end = EndGameView()
                         end_msg = await game_channel.send(embed=defeat_embed, view=view_end)
-                        logger.info(f"[GuessCharacter] Échec du jeu pour {full_name} après {max_attempts} tentatives.")
-
-                    try:
-                        view_skip.children[0].disabled = True
-                        view_skip.children[1].disabled = True
-                        view_skip.children[2].disabled = True
-                        await view_skip.main_embed_msg.edit(view=view_skip)
-                    except:
-                        pass
-
-                    if not found:
-                        async def delete_after_30s():
-                            await asyncio.sleep(30.0)
+                        try:
+                            view_skip.children[0].disabled = True
+                            view_skip.children[1].disabled = True
+                            view_skip.children[2].disabled = True
+                            await view_skip.main_embed_msg.edit(view=view_skip)
+                        except:
+                            pass
+                        restart_game = await self.wait_for_replay_button(game_channel, ctx, end_msg)
+                        if restart_game:
+                            continue
+                        else:
+                            await asyncio.sleep(30)
                             try:
                                 await game_channel.delete()
                             except:
                                 pass
-                        deletion_task_defeat = asyncio.create_task(delete_after_30s())
-                        def check_interaction(interaction: discord.Interaction):
-                            return (
-                                interaction.user.id == ctx.author.id
-                                and interaction.message.id == end_msg.id
-                                and interaction.data.get("custom_id") == "replay_game"
-                            )
-                        try:
-                            interaction = await self.bot.wait_for(
-                                "interaction", timeout=30.0, check=check_interaction
-                            )
-                            if interaction.data.get("custom_id") == "replay_game":
-                                await interaction.response.defer()
-                                deletion_task_defeat.cancel()
-                                reset_inactivity_timer()
-                                continue
-                        except asyncio.TimeoutError:
                             return
-                    return
+
+                    # Si la partie a été rejouée, on reboucle sur while True
+                    if found:
+                        continue
+                    break  # si aucune condition de replay
+
         finally:
             active_guess_ctx.discard(uniq_id)
+
+    async def wait_for_replay_button(self, game_channel, ctx, end_msg):
+        # Fonction utilitaire pour attendre le bouton "Rejouer"
+        def check_interaction(interaction: discord.Interaction):
+            return (
+                interaction.user.id == ctx.author.id
+                and interaction.message.id == end_msg.id
+                and interaction.data.get("custom_id") == "replay_game"
+            )
+        try:
+            interaction = await self.bot.wait_for(
+                "interaction", timeout=30.0, check=check_interaction
+            )
+            if interaction.data.get("custom_id") == "replay_game":
+                await interaction.response.defer()
+                return True
+        except asyncio.TimeoutError:
+            return False
 
     async def cog_unload(self):
         pass
