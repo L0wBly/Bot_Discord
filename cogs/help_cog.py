@@ -19,7 +19,16 @@ class HelpCog(commands.Cog):
             "help": "Affiche toutes les commandes générales du serveur.",
             "classement": "Affiche tous les classements sur le serveur.",
         }
+        self.general_commands_admin = {
+            "help": "Affiche toutes les commandes générales du serveur.",
+            "classement": "Affiche tous les classements sur le serveur.",
+            "setup_roles": "Configure les rôles de réaction.",
+        }
         self.jeu_commands = {
+            "helpjeu": "Affiche les commandes liées au jeu.",
+            "guess":   "Permet de deviner un personnage (jeu GuessCharacter)."
+        }
+        self.jeu_commands_admin = {
             "helpjeu": "Affiche les commandes liées au jeu.",
             "guess":   "Permet de deviner un personnage (jeu GuessCharacter)."
         }
@@ -54,7 +63,7 @@ class HelpCog(commands.Cog):
             title="📜 Commandes générales (admin)",
             color=discord.Color.blue()
         )
-        for cmd, desc in self.general_commands.items():
+        for cmd, desc in self.general_commands_admin.items():
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
 
         await ctx.send(embed=embed)
@@ -117,7 +126,7 @@ class HelpCog(commands.Cog):
             description="Liste des commandes de jeu :",
             color=discord.Color.green()
         )
-        for cmd, desc in self.jeu_commands.items():
+        for cmd, desc in self.jeu_commands_admin.items():
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
 
         await ctx.send(embed=embed)
