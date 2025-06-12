@@ -68,29 +68,29 @@ class RoleStats(commands.Cog):
             await m.delete(delay=3)
             return
 
-        # Présentation claire et espacée
-        description = "\n".join(
-            f"{emoji}  →  **{role_name}**"
-            for emoji, (role_name, _) in EMOJI_ROLE_MAP.items()
-        )
-
         embed = discord.Embed(
             title="🌟 Choisis ton rôle via les réactions ! 🌟",
             description=(
-                "**Réagis avec l'emoji correspondant pour obtenir ou retirer un rôle :**\n\n"
-                f"{description}\n\n"
-                "*Clique sur un emoji ci-dessous pour gérer tes rôles !*"
+                "**Réagis avec l'emoji correspondant pour obtenir ou retirer un rôle :**\n"
+                " \n"  # petit espace
+                "Clique sur un emoji ci-dessous pour gérer tes rôles !"
             ),
             color=discord.Color.purple()
         )
+
+        # Un field par rôle, bien lisible
+        for emoji, (role_name, _) in EMOJI_ROLE_MAP.items():
+            embed.add_field(
+                name=f"{emoji}  {role_name}",
+                value="\u200b",  # espace invisible pour un style compact mais espacé
+                inline=False
+            )
 
         msg = await channel.send(embed=embed)
         for emoji in EMOJI_ROLE_MAP.keys():
             await msg.add_reaction(emoji)
 
-        # Supprime le message de commande après 3 secondes (le !setup_roles du staff)
         await ctx.message.delete(delay=3)
-        # Ne pas envoyer de message de confirmation ou alors le supprimer instantanément (ici on ne l'affiche même plus)
 
     async def update_stats(self, guild):
         stats = {role_name: 0 for role_name, _ in EMOJI_ROLE_MAP.values()}
