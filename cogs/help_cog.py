@@ -19,14 +19,14 @@ class HelpCog(commands.Cog):
             "help": "Affiche toutes les commandes générales du serveur.",
             "classement": "Affiche tous les classements sur le serveur.",
             "clear": "Supprime les messages de l'utilisateur dans le salon.",
-            "clear [nombre]": "upprime un certain nombre de messages de l'utilisateur dans le salon.",
+            "clear [nombre]": "Supprime un certain nombre de messages de l'utilisateur dans le salon.",
         }
         self.general_commands_admin = {
             "help": "Affiche toutes les commandes générales du serveur.",
             "classement": "Affiche tous les classements sur le serveur.",
             "setup_roles": "Configure les rôles de réaction.",
             "clear": "Supprime les messages de l'utilisateur dans le salon.",
-            "clear [nombre]": "upprime un certain nombre de messages de l'utilisateur dans le salon.",
+            "clear [nombre]": "Supprime un certain nombre de messages de l'utilisateur dans le salon.",
         }
         self.jeu_commands = {
             "helpjeu": "Affiche les commandes liées au jeu.",
