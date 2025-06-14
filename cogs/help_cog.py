@@ -9,8 +9,6 @@ from config import (
 )
 
 class HelpCog(commands.Cog):
-    """Commande help contextuel selon rôle."""
-
     def __init__(self, bot):
         self.bot = bot
         self.general_commands = {
@@ -26,14 +24,13 @@ class HelpCog(commands.Cog):
             "clear": "Supprime les messages de l'utilisateur dans le salon.",
             "clear [nombre]": "Supprime un certain nombre de messages de l'utilisateur dans le salon.",
         }
+        # ENLÈVE "helpjeu" des listes ici, car ce n'est PAS une commande à afficher dans l'embed
         self.jeu_commands = {
-            "helpjeu": "Affiche les commandes liées au jeu.",
             "guess":   "Permet de deviner un personnage (jeu GuessCharacter)."
         }
         self.jeu_commands_admin = {
-            "helpjeu": "Affiche les commandes liées au jeu.",
             "guess":   "Permet de deviner un personnage (jeu GuessCharacter).",
-            "test":   "Permet de deviner un personnage (jeu GuessCharacter).",
+            "test":   "Commande de test admin."
         }
 
     async def _delete_after(self, msg, delay):
@@ -78,11 +75,10 @@ class HelpCog(commands.Cog):
         sent = await ctx.send(embed=embed)
         await self._delete_after(sent, 120)  # 2 min
 
-    @commands.command(name="helpjeu", aliases=["hjeu"])
+    @commands.command(name="helpjeu")
     async def helpjeu_cmd(self, ctx):
         """Affiche le helpjeu selon le rôle admin. Supprime l'embed après 2min."""
 
-        # Ici on vérifie d'abord le salon
         if ctx.channel.id != HELPJEU_CHANNEL_ID:
             m = await ctx.send("⚠️ `!helpjeu` doit être utilisé dans #jeu.")
             await self._delete_after(ctx.message, 2)
