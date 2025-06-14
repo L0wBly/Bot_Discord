@@ -79,7 +79,7 @@ class HelpCog(commands.Cog):
     # ─────────────────────────────────────────────────────────────────────────
     @commands.command(name="help")
     async def help_user(self, ctx):
-        """!help — liste des commandes générales, embed auto-supprimé."""
+        """!help — liste des commandes générales, embed auto-supprimé après 3min."""
         # Permission
         if not self._has_role(ctx):
             await self._delete_after(await ctx.message.delete(), 0)
@@ -106,8 +106,8 @@ class HelpCog(commands.Cog):
         embed.set_footer(text="Tapez `!helpjeu` dans #jeu pour les commandes de jeu.")
 
         sent = await ctx.send(embed=embed)
-        # Suppression embed après 60s
-        return await self._delete_after(sent, 60)
+        # Suppression embed après 180s (3min)
+        return await self._delete_after(sent, 180)
 
     # ─────────────────────────────────────────────────────────────────────────
     @commands.command(name="helpjeuadmin")
@@ -142,7 +142,7 @@ class HelpCog(commands.Cog):
     # ─────────────────────────────────────────────────────────────────────────
     @commands.command(name="helpjeu")
     async def help_jeu_user(self, ctx):
-        """!helpjeu — liste des commandes de jeu, embed auto-supprimé."""
+        """!helpjeu — liste des commandes de jeu, embed auto-supprimé après 3min."""
         # Permission
         if not self._has_role(ctx):
             await self._delete_after(await ctx.message.delete(), 0)
@@ -168,8 +168,8 @@ class HelpCog(commands.Cog):
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
 
         sent = await ctx.send(embed=embed)
-        # Suppression embed après 60s
-        return await self._delete_after(sent, 60)
+        # Suppression embed après 180s (3min)
+        return await self._delete_after(sent, 180)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(HelpCog(bot))
