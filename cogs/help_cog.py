@@ -47,7 +47,9 @@ class HelpCog(commands.Cog):
     async def help_cmd(self, ctx):
         """Affiche le help selon le rôle admin. Supprime l'embed après 2min."""
 
-        # Seulement dans le bon salon
+        # DEBUG: Affiche les IDs pour diagnostic
+        print(f"[HELP] ctx.channel.id = {ctx.channel.id}, HELP_CHANNEL_ID = {HELP_CHANNEL_ID}")
+
         if ctx.channel.id != HELP_CHANNEL_ID:
             m = await ctx.send("⚠️ `!help` doit être utilisé dans #commandes.")
             await self._delete_after(ctx.message, 2)
@@ -84,7 +86,9 @@ class HelpCog(commands.Cog):
     async def helpjeu_cmd(self, ctx):
         """Affiche le helpjeu selon le rôle admin. Supprime l'embed après 2min."""
 
-        # Seulement dans le bon salon
+        # DEBUG: Affiche les IDs pour diagnostic
+        print(f"[HELPJEU] ctx.channel.id = {ctx.channel.id}, HELPJEU_CHANNEL_ID = {HELPJEU_CHANNEL_ID}")
+
         if ctx.channel.id != HELPJEU_CHANNEL_ID:
             m = await ctx.send("⚠️ `!helpjeu` doit être utilisé dans #jeu.")
             await self._delete_after(ctx.message, 2)
