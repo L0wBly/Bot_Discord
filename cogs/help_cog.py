@@ -32,7 +32,8 @@ class HelpCog(commands.Cog):
         }
         self.jeu_commands_admin = {
             "helpjeu": "Affiche les commandes liées au jeu.",
-            "guess":   "Permet de deviner un personnage (jeu GuessCharacter)."
+            "guess":   "Permet de deviner un personnage (jeu GuessCharacter).",
+            "test":   "Permet de deviner un personnage (jeu GuessCharacter)."
         }
 
     async def _delete_after(self, msg, delay):
@@ -44,21 +45,19 @@ class HelpCog(commands.Cog):
 
     @commands.command(name="help")
     async def help_cmd(self, ctx):
-        """Affiche le help adapté selon si tu as le rôle admin ou non. Supprime l'embed après 2min."""
+        """Affiche le help selon le rôle admin. Supprime l'embed après 2min."""
 
-        # Commande seulement dans le salon prévu
+        # Seulement dans le bon salon
         if ctx.channel.id != HELP_CHANNEL_ID:
-            m = await ctx.send("⚠️ `!help` uniquement dans #commandes.")
-            await ctx.message.delete()
+            m = await ctx.send("⚠️ `!help` doit être utilisé dans #commandes.")
+            await self._delete_after(ctx.message, 2)
             await self._delete_after(m, 5)
             return
 
         await self._delete_after(ctx.message, 2)
 
-        # On regarde si le membre a le rôle admin
         is_admin = any(role.id == ADMIN_HELP_ROLE_ID for role in ctx.author.roles)
 
-        # On choisit le set de commandes et le style
         if is_admin:
             embed = discord.Embed(
                 title="🛡️ Commandes administrateur",
@@ -83,21 +82,19 @@ class HelpCog(commands.Cog):
 
     @commands.command(name="helpjeu")
     async def helpjeu_cmd(self, ctx):
-        """Affiche le helpjeu adapté selon si tu as le rôle admin ou non. Supprime l'embed après 2min."""
+        """Affiche le helpjeu selon le rôle admin. Supprime l'embed après 2min."""
 
-        # Commande seulement dans le salon prévu
+        # Seulement dans le bon salon
         if ctx.channel.id != HELPJEU_CHANNEL_ID:
-            m = await ctx.send("⚠️ `!helpjeu` uniquement dans #jeu.")
-            await ctx.message.delete()
+            m = await ctx.send("⚠️ `!helpjeu` doit être utilisé dans #jeu.")
+            await self._delete_after(ctx.message, 2)
             await self._delete_after(m, 5)
             return
 
         await self._delete_after(ctx.message, 2)
 
-        # On regarde si le membre a le rôle admin
         is_admin = any(role.id == ADMIN_HELP_ROLE_ID for role in ctx.author.roles)
 
-        # On choisit le set de commandes et le style
         if is_admin:
             embed = discord.Embed(
                 title="🛡️ Commandes jeu (admin)",
