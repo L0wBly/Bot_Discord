@@ -65,13 +65,17 @@ class HelpCog(commands.Cog):
         # Supprimer la commande après 2s pour être clean
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
-        # Embed
+        # Embed admin bien différencié !
         embed = discord.Embed(
-            title="📜 Commandes générales (admin)",
-            color=discord.Color.blue()
+            title="🛡️ Commandes générales (admin)",
+            description="**Liste des commandes administrateur du serveur :**\n\n"
+                        "*(Inclut les commandes avancées uniquement pour staff)*",
+            color=discord.Color.orange()
         )
         for cmd, desc in self.general_commands_admin.items():
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
+
+        embed.set_footer(text="Seuls les membres avec le rôle staff peuvent utiliser ces commandes avancées.")
 
         await ctx.send(embed=embed)
         # PAS de suppression de l'embed ici !
@@ -95,9 +99,9 @@ class HelpCog(commands.Cog):
         # Suppression commande après 2s
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
-        # Embed
+        # Embed user classique (bleu)
         embed = discord.Embed(
-            title="📜 Commandes générales",
+            title="📒 Commandes générales",
             description="Liste des commandes :",
             color=discord.Color.blue()
         )
@@ -127,14 +131,16 @@ class HelpCog(commands.Cog):
         # Supprimer la commande après 2s pour être clean
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
-        # Embed
+        # Embed admin jeu
         embed = discord.Embed(
-            title="🎮 Commandes de jeu (admin)",
-            description="Liste des commandes de jeu :",
-            color=discord.Color.green()
+            title="🛡️ Commandes de jeu (admin)",
+            description="**Liste des commandes de jeu pour les administrateurs :**",
+            color=discord.Color.orange()
         )
         for cmd, desc in self.jeu_commands_admin.items():
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
+
+        embed.set_footer(text="Seuls les membres avec le rôle staff peuvent utiliser ces commandes avancées.")
 
         await ctx.send(embed=embed)
         # PAS de suppression de l'embed ici !
@@ -158,7 +164,7 @@ class HelpCog(commands.Cog):
         # Suppression commande après 2s
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
-        # Embed
+        # Embed user jeu
         embed = discord.Embed(
             title="🎮 Commandes de jeu",
             description="Liste des commandes de jeu :",
