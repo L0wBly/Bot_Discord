@@ -51,6 +51,7 @@ class HelpCog(commands.Cog):
     @commands.command(name="helpadmin")
     async def help_admin(self, ctx):
         """!helpadmin (admin only) — liste des commandes générales, embed persistant."""
+        print("[HELP_COG] helpadmin lancé")  # DEBUG, à retirer si tu veux
         # Permission
         if not self._has_role(ctx):
             await self._delete_after(await ctx.message.delete(), 0)
@@ -65,17 +66,16 @@ class HelpCog(commands.Cog):
         # Supprimer la commande après 2s pour être clean
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
-        # Embed admin bien différencié !
+        # Embed ADMIN (très différent)
         embed = discord.Embed(
-            title="🛡️ Commandes générales (admin)",
+            title="🛡️ Commandes générales ADMIN",
             description="**Liste des commandes administrateur du serveur :**\n\n"
-                        "*(Inclut les commandes avancées uniquement pour staff)*",
+                        "*(Inclut les commandes avancées réservées au staff)*",
             color=discord.Color.orange()
         )
         for cmd, desc in self.general_commands_admin.items():
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
-
-        embed.set_footer(text="Seuls les membres avec le rôle staff peuvent utiliser ces commandes avancées.")
+        embed.set_footer(text="⚠️ Seuls les membres avec le rôle staff peuvent utiliser ces commandes.")
 
         await ctx.send(embed=embed)
         # PAS de suppression de l'embed ici !
@@ -84,6 +84,7 @@ class HelpCog(commands.Cog):
     @commands.command(name="help")
     async def help_user(self, ctx):
         """!help — liste des commandes générales, embed auto-supprimé après 3min."""
+        print("[HELP_COG] help lancé")  # DEBUG, à retirer si tu veux
         # Permission
         if not self._has_role(ctx):
             await self._delete_after(await ctx.message.delete(), 0)
@@ -99,7 +100,7 @@ class HelpCog(commands.Cog):
         # Suppression commande après 2s
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
-        # Embed user classique (bleu)
+        # Embed utilisateur (bleu)
         embed = discord.Embed(
             title="📒 Commandes générales",
             description="Liste des commandes :",
@@ -117,18 +118,16 @@ class HelpCog(commands.Cog):
     @commands.command(name="helpjeuadmin")
     async def help_jeu_admin(self, ctx):
         """!helpjeuadmin (admin only) — liste des commandes de jeu, embed persistant."""
-        # Permission
+        print("[HELP_COG] helpjeuadmin lancé")  # DEBUG, à retirer si tu veux
         if not self._has_role(ctx):
             await self._delete_after(await ctx.message.delete(), 0)
             err = await ctx.send(f"⚠️ Rôle requis : <@&{HELPER_ROLE_ID}>")
             return await self._delete_after(err, 5)
 
-        # Canal
         if ctx.channel.id != HELPJEU_CHANNEL_ID:
             err = await ctx.send("⚠️ `!helpjeuadmin` réservé au salon #jeu.")
             return await self._delete_after(err, 5)
 
-        # Supprimer la commande après 2s pour être clean
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
         # Embed admin jeu
@@ -139,32 +138,28 @@ class HelpCog(commands.Cog):
         )
         for cmd, desc in self.jeu_commands_admin.items():
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
-
-        embed.set_footer(text="Seuls les membres avec le rôle staff peuvent utiliser ces commandes avancées.")
+        embed.set_footer(text="⚠️ Seuls les membres avec le rôle staff peuvent utiliser ces commandes.")
 
         await ctx.send(embed=embed)
-        # PAS de suppression de l'embed ici !
 
     # ─────────────────────────────────────────────────────────────────────────
     @commands.command(name="helpjeu")
     async def help_jeu_user(self, ctx):
         """!helpjeu — liste des commandes de jeu, embed auto-supprimé après 3min."""
-        # Permission
+        print("[HELP_COG] helpjeu lancé")  # DEBUG, à retirer si tu veux
         if not self._has_role(ctx):
             await self._delete_after(await ctx.message.delete(), 0)
             err = await ctx.send(f"⚠️ Rôle requis : <@&{HELPER_ROLE_ID}>")
             return await self._delete_after(err, 5)
 
-        # Canal
         if ctx.channel.id != HELPJEU_CHANNEL_ID:
             await self._delete_after(ctx.message, 2)
             err = await ctx.send("⚠️ `!helpjeu` réservé au salon #jeu.")
             return await self._delete_after(err, 5)
 
-        # Suppression commande après 2s
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
-        # Embed user jeu
+        # Embed jeu user
         embed = discord.Embed(
             title="🎮 Commandes de jeu",
             description="Liste des commandes de jeu :",
@@ -174,7 +169,6 @@ class HelpCog(commands.Cog):
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
 
         sent = await ctx.send(embed=embed)
-        # Suppression embed après 180s (3min)
         return await self._delete_after(sent, 180)
 
 async def setup(bot: commands.Bot):
