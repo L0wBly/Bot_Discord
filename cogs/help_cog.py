@@ -62,6 +62,9 @@ class HelpCog(commands.Cog):
             err = await ctx.send("⚠️ `!helpadmin` réservé au salon #commandes.")
             return await self._delete_after(err, 5)
 
+        # Supprimer la commande après 2s pour être clean
+        asyncio.create_task(self._delete_after(ctx.message, 2))
+
         # Embed
         embed = discord.Embed(
             title="📜 Commandes générales (admin)",
@@ -71,7 +74,7 @@ class HelpCog(commands.Cog):
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
 
         await ctx.send(embed=embed)
-        # pas de suppression de l’embed
+        # PAS de suppression de l'embed ici !
 
     # ─────────────────────────────────────────────────────────────────────────
     @commands.command(name="help")
@@ -121,7 +124,7 @@ class HelpCog(commands.Cog):
             err = await ctx.send("⚠️ `!helpjeuadmin` réservé au salon #jeu.")
             return await self._delete_after(err, 5)
 
-        # Supprimer commande après 2s
+        # Supprimer la commande après 2s pour être clean
         asyncio.create_task(self._delete_after(ctx.message, 2))
 
         # Embed
@@ -134,7 +137,7 @@ class HelpCog(commands.Cog):
             embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
 
         await ctx.send(embed=embed)
-        # pas de suppression de l’embed
+        # PAS de suppression de l'embed ici !
 
     # ─────────────────────────────────────────────────────────────────────────
     @commands.command(name="helpjeu")
