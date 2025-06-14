@@ -33,7 +33,7 @@ class HelpCog(commands.Cog):
         self.jeu_commands_admin = {
             "helpjeu": "Affiche les commandes liées au jeu.",
             "guess":   "Permet de deviner un personnage (jeu GuessCharacter).",
-            "test":   "Permet de deviner un personnage (jeu GuessCharacter)."
+            "test":   "Permet de deviner un personnage (jeu GuessCharacter).",
         }
 
     async def _delete_after(self, msg, delay):
