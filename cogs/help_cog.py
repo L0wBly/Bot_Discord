@@ -3,7 +3,7 @@ from discord.ext import commands
 
 class HelpCog(commands.Cog):
     def __init__(self, bot):
-        print("HelpCog loaded!")  # Affiche si la cog est bien chargée
+        print("HelpCog loaded!")  # Ce print DOIT apparaître
         self.bot = bot
 
     @commands.command(name="help")
