@@ -9,8 +9,11 @@ from config import (
 )
 
 class HelpCog(commands.Cog):
+    """Commande help contextuel selon rôle."""
+
     def __init__(self, bot):
         self.bot = bot
+        print("HelpCog loaded !")  # DEBUG : pour voir si la cog est bien chargée
         self.general_commands = {
             "help": "Affiche toutes les commandes générales du serveur.",
             "classement": "Affiche tous les classements sur le serveur.",
@@ -24,7 +27,6 @@ class HelpCog(commands.Cog):
             "clear": "Supprime les messages de l'utilisateur dans le salon.",
             "clear [nombre]": "Supprime un certain nombre de messages de l'utilisateur dans le salon.",
         }
-        # ENLÈVE "helpjeu" des listes ici, car ce n'est PAS une commande à afficher dans l'embed
         self.jeu_commands = {
             "guess":   "Permet de deviner un personnage (jeu GuessCharacter)."
         }
@@ -42,8 +44,7 @@ class HelpCog(commands.Cog):
 
     @commands.command(name="help")
     async def help_cmd(self, ctx):
-        """Affiche le help selon le rôle admin. Supprime l'embed après 2min."""
-
+        print("help_cmd called")  # DEBUG
         if ctx.channel.id != HELP_CHANNEL_ID:
             m = await ctx.send("⚠️ `!help` doit être utilisé dans #commandes.")
             await self._delete_after(ctx.message, 2)
@@ -70,17 +71,16 @@ class HelpCog(commands.Cog):
             )
             for cmd, desc in self.general_commands.items():
                 embed.add_field(name=f"`!{cmd}`", value=desc, inline=False)
-            embed.set_footer(text="Besoin des commandes jeu ? Tape !helpjeu dans #jeu.")
+            embed.set_footer(text="Besoin des commandes jeu ? Tape !helpj dans #jeu.")
 
         sent = await ctx.send(embed=embed)
-        await self._delete_after(sent, 120)  # 2 min
+        await self._delete_after(sent, 120)
 
-    @commands.command(name="helpjeu")
+    @commands.command(name="helpj")
     async def helpjeu_cmd(self, ctx):
-        """Affiche le helpjeu selon le rôle admin. Supprime l'embed après 2min."""
-
+        print("helpjeu_cmd called")  # DEBUG
         if ctx.channel.id != HELPJEU_CHANNEL_ID:
-            m = await ctx.send("⚠️ `!helpjeu` doit être utilisé dans #jeu.")
+            m = await ctx.send("⚠️ `!helpj` doit être utilisé dans #jeu.")
             await self._delete_after(ctx.message, 2)
             await self._delete_after(m, 5)
             return
@@ -108,7 +108,7 @@ class HelpCog(commands.Cog):
             embed.set_footer(text="")
 
         sent = await ctx.send(embed=embed)
-        await self._delete_after(sent, 120)  # 2 min
+        await self._delete_after(sent, 120)
 
 async def setup(bot):
     await bot.add_cog(HelpCog(bot))
