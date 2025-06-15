@@ -3,7 +3,7 @@ from discord.ext import commands
 
 class HelpCog(commands.Cog):
     def __init__(self, bot):
-        print("HelpCog loaded!")  # DEBUG pour voir si la cog est chargée
+        print("HelpCog loaded!")  # Affiche si la cog est bien chargée
         self.bot = bot
 
     @commands.command(name="help")
@@ -18,3 +18,4 @@ class HelpCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(HelpCog(bot))
+    print("Commandes enregistrées :", [cmd.name for cmd in bot.commands])
