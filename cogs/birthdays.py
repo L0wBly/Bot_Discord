@@ -45,9 +45,9 @@ class Birthdays(commands.Cog):
     def get_today_date_paris(self):
         paris_tz = pytz.timezone("Europe/Paris")
         now = datetime.now(paris_tz)
-        return now.strftime("%d-%m")
+        return now.strftime("%d-%m")  # JJ-MM
 
-    @tasks.loop(time=time(hour=8, minute=0))
+    @tasks.loop(time=time(hour=8, minute=0))  # 08:00 UTC = 10:00 Paris
     async def check_birthdays(self):
         today = self.get_today_date_paris()
         birthdays = self.load_birthdays()
@@ -148,7 +148,10 @@ class Birthdays(commands.Cog):
     @commands.command(name="annivs")
     async def annivs(self, ctx):
         birthdays = self.load_birthdays()
-        today = datetime.now(pytz.timezone("Europe/Paris")).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Corrigé : obtenir la date sans l'heure ni timezone
+        now_paris = datetime.now(pytz.timezone("Europe/Paris"))
+        today = datetime(now_paris.year, now_paris.month, now_paris.day)
 
         upcoming = []
         for user_id, date_str in birthdays.items():
