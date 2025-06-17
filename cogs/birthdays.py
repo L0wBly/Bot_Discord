@@ -39,7 +39,8 @@ class Birthdays(commands.Cog):
 
     def get_today_date_paris(self):
         paris_tz = pytz.timezone("Europe/Paris")
-        return datetime.now(paris_tz).strftime("%m-%d")
+        now = datetime.now(paris_tz)
+        return now.strftime("%d-%m")  # JJ-MM
 
     @tasks.loop(time=time(hour=8, minute=0))  # 08:00 UTC = 10:00 Paris
     async def check_birthdays(self):
@@ -55,20 +56,27 @@ class Birthdays(commands.Cog):
             if date == today:
                 try:
                     user = await self.bot.fetch_user(int(user_id))
+                    jour, mois = map(int, date.split("-"))
+                    date_formatee = datetime(2000, mois, jour).strftime("%d %B")  # Ex : 10 octobre
+
                     embed = discord.Embed(
-                        title="🎉 Joyeux anniversaire ! 🎉",
-                        description=f"Souhaitons un merveilleux anniversaire à {user.mention} ! 🥳🎂",
-                        color=discord.Color.magenta()
+                        title="🥳 Joyeux anniversaire !",
+                        description=(
+                            f"🎂 **{user.mention}** fête son anniversaire aujourd’hui !\n\n"
+                            f"📅 Date : **{date_formatee} ({date})**\n"
+                            f"💌 Toute la communauté te souhaite une journée inoubliable !"
+                        ),
+                        color=discord.Color.gold()
                     )
                     embed.set_thumbnail(url=user.display_avatar.url)
-                    embed.set_footer(text="Toute la communauté te souhaite le meilleur ! ❤️")
+                    embed.set_footer(text="🎈 Profite bien de ta journée !")
                     await channel.send(content=user.mention, embed=embed)
                 except Exception as e:
                     logger.error(f"[Birthdays] Erreur lors du message à {user_id} : {e}")
 
     @commands.command(name="anniv")
     async def anniv(self, ctx, date: str = None):
-        """Ajoute, modifie ou affiche ton anniversaire (format MM-JJ)"""
+        """Ajoute, modifie ou affiche ton anniversaire (format JJ-MM)"""
         birthdays = self.load_birthdays()
         user_id = str(ctx.author.id)
 
@@ -76,12 +84,13 @@ class Birthdays(commands.Cog):
             if user_id in birthdays:
                 return await ctx.send(f"🎂 Ton anniversaire est : **{birthdays[user_id]}**")
             else:
-                return await ctx.send("❌ Tu n'as pas encore enregistré de date. Utilise `!anniv MM-JJ`")
-        
+                return await ctx.send("❌ Tu n'as pas encore enregistré de date. Utilise `!anniv JJ-MM`")
+
         try:
-            datetime.strptime(date, "%m-%d")
+            jour, mois = map(int, date.split("-"))
+            datetime.strptime(f"{mois}-{jour}", "%m-%d")  # Valider la date en inversant
         except ValueError:
-            return await ctx.send("❌ Format invalide. Utilise `MM-JJ`, par ex. `06-17`")
+            return await ctx.send("❌ Format invalide. Utilise JJ-MM, par ex. `10-06`")
 
         birthdays[user_id] = date
         self.save_birthdays(birthdays)
@@ -109,10 +118,11 @@ class Birthdays(commands.Cog):
         upcoming = []
         for user_id, date_str in birthdays.items():
             try:
-                date_full = datetime.strptime(date_str, "%m-%d").replace(year=today.year)
+                jour, mois = map(int, date_str.split("-"))
+                date_full = datetime(today.year, mois, jour)
                 if date_full < today:
                     date_full = date_full.replace(year=today.year + 1)
-                upcoming.append((user_id, date_full))
+                upcoming.append((user_id, date_full, date_str))
             except:
                 continue
 
@@ -127,12 +137,13 @@ class Birthdays(commands.Cog):
             color=discord.Color.blurple()
         )
 
-        for user_id, d in top_20:
+        for user_id, d, raw_date in top_20:
             try:
                 user = await self.bot.fetch_user(int(user_id))
+                date_formatted = d.strftime("%d %B")
                 embed.add_field(
                     name=user.display_name,
-                    value=d.strftime("🎂 %d %B (%m-%d)"),
+                    value=f"🎂 {date_formatted} ({raw_date})",
                     inline=False
                 )
             except:
