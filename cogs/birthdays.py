@@ -8,7 +8,6 @@ import pytz
 from config import BIRTHDAY_CHANNEL_ID
 from utils.logger import logger
 
-# Mois en français (manuels pour éviter l'anglais de strftime)
 MOIS_FR = [
     "janvier", "février", "mars", "avril", "mai", "juin",
     "juillet", "août", "septembre", "octobre", "novembre", "décembre"
@@ -46,9 +45,9 @@ class Birthdays(commands.Cog):
     def get_today_date_paris(self):
         paris_tz = pytz.timezone("Europe/Paris")
         now = datetime.now(paris_tz)
-        return now.strftime("%d-%m")  # JJ-MM
+        return now.strftime("%d-%m")
 
-    @tasks.loop(time=time(hour=8, minute=0))  # 08:00 UTC = 10:00 Paris
+    @tasks.loop(time=time(hour=8, minute=0))
     async def check_birthdays(self):
         today = self.get_today_date_paris()
         birthdays = self.load_birthdays()
@@ -82,7 +81,6 @@ class Birthdays(commands.Cog):
 
     @commands.command(name="anniv")
     async def anniv(self, ctx, date: str = None):
-        """Ajoute, modifie ou affiche ton anniversaire (format JJ-MM)"""
         birthdays = self.load_birthdays()
         user_id = str(ctx.author.id)
 
@@ -127,7 +125,6 @@ class Birthdays(commands.Cog):
 
     @commands.command(name="delanniv")
     async def delanniv(self, ctx):
-        """Supprime ton anniversaire"""
         birthdays = self.load_birthdays()
         user_id = str(ctx.author.id)
 
@@ -150,9 +147,8 @@ class Birthdays(commands.Cog):
 
     @commands.command(name="annivs")
     async def annivs(self, ctx):
-        """Affiche les 20 prochains anniversaires à venir"""
         birthdays = self.load_birthdays()
-        today = datetime.now(pytz.timezone("Europe/Paris"))
+        today = datetime.now(pytz.timezone("Europe/Paris")).replace(hour=0, minute=0, second=0, microsecond=0)
 
         upcoming = []
         for user_id, date_str in birthdays.items():
