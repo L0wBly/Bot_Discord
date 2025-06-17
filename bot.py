@@ -2,6 +2,7 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+import traceback  # ⬅️ nécessaire pour afficher les erreurs complètes
 
 from utils.logger import logger
 
@@ -29,7 +30,7 @@ async def load_cogs():
             await bot.load_extension(ext)
             logger.info(f"✔️ Cog chargé : {ext}")
         except Exception as e:
-            logger.error(f"❌ Erreur au chargement du cog {ext} : {e}")
+            logger.error(f"❌ Erreur au chargement du cog {ext} : {e}\n{traceback.format_exc()}")
 
 @bot.event
 async def on_ready():
@@ -48,7 +49,6 @@ async def on_message(message: discord.Message):
             return
     await bot.process_commands(message)
 
-# ✅ FIX ici : utilise le bon contexte async
 async def main():
     async with bot:
         await load_cogs()
