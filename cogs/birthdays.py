@@ -59,19 +59,39 @@ class Birthdays(commands.Cog):
                 except Exception as e:
                     logger.error(f"[Birthdays] Erreur lors du message à {user_id} : {e}")
 
-    @commands.command(name="set_birthday")
-    async def set_birthday(self, ctx, date: str):
-        """Enregistre ta date d'anniversaire au format MM-JJ (ex: 06-17)"""
+    @commands.command(name="anniv")
+    async def anniv(self, ctx, date: str = None):
+        """Ajoute, modifie ou affiche ton anniversaire (format MM-JJ)"""
+        birthdays = self.load_birthdays()
+        user_id = str(ctx.author.id)
+
+        if date is None:
+            if user_id in birthdays:
+                return await ctx.send(f"🎂 Ton anniversaire est : **{birthdays[user_id]}**")
+            else:
+                return await ctx.send("❌ Tu n'as pas encore enregistré de date. Utilise `!anniv MM-JJ`")
+        
         try:
             datetime.strptime(date, "%m-%d")
         except ValueError:
-            return await ctx.send("❌ Format invalide. Utilise MM-JJ, par exemple `06-17`")
+            return await ctx.send("❌ Format invalide. Utilise `MM-JJ`, par ex. `06-17`")
 
-        birthdays = self.load_birthdays()
-        birthdays[str(ctx.author.id)] = date
+        birthdays[user_id] = date
         self.save_birthdays(birthdays)
+        await ctx.send(f"✅ Ton anniversaire a été enregistré/modifié pour le **{date}** !")
 
-        await ctx.send(f"✅ Ton anniversaire a été enregistré pour le **{date}** !")
+    @commands.command(name="delanniv")
+    async def delanniv(self, ctx):
+        """Supprime ton anniversaire"""
+        birthdays = self.load_birthdays()
+        user_id = str(ctx.author.id)
+
+        if user_id in birthdays:
+            del birthdays[user_id]
+            self.save_birthdays(birthdays)
+            await ctx.send("🗑️ Ton anniversaire a été supprimé.")
+        else:
+            await ctx.send("❌ Tu n'avais pas enregistré de date.")
 
 async def setup(bot):
     await bot.add_cog(Birthdays(bot))
