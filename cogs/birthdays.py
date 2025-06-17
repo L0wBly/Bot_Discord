@@ -102,7 +102,7 @@ class Birthdays(commands.Cog):
 
     @commands.command(name="annivs")
     async def annivs(self, ctx):
-        """Affiche les 20 prochains anniversaires à venir"""
+        """Affiche les 20 prochains anniversaires à venir (même lointains)"""
         birthdays = self.load_birthdays()
         today = datetime.now(pytz.timezone("Europe/Paris"))
 
