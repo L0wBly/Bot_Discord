@@ -57,7 +57,7 @@ class Birthdays(commands.Cog):
                 try:
                     user = await self.bot.fetch_user(int(user_id))
                     jour, mois = map(int, date.split("-"))
-                    date_formatee = datetime(2000, mois, jour).strftime("%d %B")  # Ex : 10 octobre
+                    date_formatee = datetime(2000, mois, jour).strftime("%d %B")
 
                     embed = discord.Embed(
                         title="🥳 Joyeux anniversaire !",
@@ -82,19 +82,39 @@ class Birthdays(commands.Cog):
 
         if date is None:
             if user_id in birthdays:
-                return await ctx.send(f"🎂 Ton anniversaire est : **{birthdays[user_id]}**")
+                embed = discord.Embed(
+                    title="🎂 Ton anniversaire",
+                    description=f"Tu as enregistré la date : **{birthdays[user_id]}**",
+                    color=discord.Color.blue()
+                )
+                return await ctx.send(embed=embed)
             else:
-                return await ctx.send("❌ Tu n'as pas encore enregistré de date. Utilise `!anniv JJ-MM`")
+                embed = discord.Embed(
+                    title="❌ Aucune date trouvée",
+                    description="Tu n'as pas encore enregistré de date. Utilise `!anniv JJ-MM`",
+                    color=discord.Color.red()
+                )
+                return await ctx.send(embed=embed)
 
         try:
             jour, mois = map(int, date.split("-"))
-            datetime.strptime(f"{mois}-{jour}", "%m-%d")  # Valider la date en inversant
+            datetime.strptime(f"{mois}-{jour}", "%m-%d")
         except ValueError:
-            return await ctx.send("❌ Format invalide. Utilise JJ-MM, par ex. `10-06`")
+            embed = discord.Embed(
+                title="❌ Format invalide",
+                description="Utilise le format `JJ-MM`, par exemple `10-06`",
+                color=discord.Color.red()
+            )
+            return await ctx.send(embed=embed)
 
         birthdays[user_id] = date
         self.save_birthdays(birthdays)
-        await ctx.send(f"✅ Ton anniversaire a été enregistré/modifié pour le **{date}** !")
+        embed = discord.Embed(
+            title="✅ Anniversaire enregistré !",
+            description=f"Ton anniversaire a été enregistré/modifié pour le **{date}** 🎂",
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed)
 
     @commands.command(name="delanniv")
     async def delanniv(self, ctx):
@@ -105,13 +125,23 @@ class Birthdays(commands.Cog):
         if user_id in birthdays:
             del birthdays[user_id]
             self.save_birthdays(birthdays)
-            await ctx.send("🗑️ Ton anniversaire a été supprimé.")
+            embed = discord.Embed(
+                title="🗑️ Anniversaire supprimé",
+                description="Ton anniversaire a été supprimé avec succès.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
         else:
-            await ctx.send("❌ Tu n'avais pas enregistré de date.")
+            embed = discord.Embed(
+                title="❌ Aucun anniversaire enregistré",
+                description="Tu n'avais pas enregistré de date.",
+                color=discord.Color.red()
+            )
+            await ctx.send(embed=embed)
 
     @commands.command(name="annivs")
     async def annivs(self, ctx):
-        """Affiche les 20 prochains anniversaires à venir (même lointains)"""
+        """Affiche les 20 prochains anniversaires à venir"""
         birthdays = self.load_birthdays()
         today = datetime.now(pytz.timezone("Europe/Paris"))
 
@@ -130,7 +160,12 @@ class Birthdays(commands.Cog):
         top_20 = upcoming[:20]
 
         if not top_20:
-            return await ctx.send("🎉 Aucun anniversaire à venir pour l’instant.")
+            embed = discord.Embed(
+                title="🎉 Prochains anniversaires",
+                description="Aucun anniversaire à venir pour l’instant.",
+                color=discord.Color.blurple()
+            )
+            return await ctx.send(embed=embed)
 
         embed = discord.Embed(
             title="📅 Prochains anniversaires (20 max)",
