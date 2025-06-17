@@ -93,5 +93,48 @@ class Birthdays(commands.Cog):
         else:
             await ctx.send("❌ Tu n'avais pas enregistré de date.")
 
+    @commands.command(name="annivs")
+    async def annivs(self, ctx):
+        """Affiche les 20 prochains anniversaires à venir"""
+        birthdays = self.load_birthdays()
+        today = datetime.now(pytz.timezone("Europe/Paris"))
+        today_mmdd = today.strftime("%m-%d")
+
+        # Crée une liste (user_id, date complète) triée
+        upcoming = []
+        for user_id, date_str in birthdays.items():
+            try:
+                date_full = datetime.strptime(date_str, "%m-%d").replace(year=today.year)
+                if date_full < today:
+                    date_full = date_full.replace(year=today.year + 1)
+                upcoming.append((user_id, date_full))
+            except:
+                continue
+
+        # Trie et prend les 20 premiers
+        upcoming.sort(key=lambda x: x[1])
+        top_20 = upcoming[:20]
+
+        if not top_20:
+            return await ctx.send("🎉 Aucun anniversaire à venir pour l’instant.")
+
+        embed = discord.Embed(
+            title="📅 Prochains anniversaires (20 max)",
+            color=discord.Color.blurple()
+        )
+
+        for user_id, d in top_20:
+            try:
+                user = await self.bot.fetch_user(int(user_id))
+                embed.add_field(
+                    name=user.display_name,
+                    value=d.strftime("🎂 %d %B (%m-%d)"),
+                    inline=False
+                )
+            except:
+                continue
+
+        await ctx.send(embed=embed)
+
 async def setup(bot):
     await bot.add_cog(Birthdays(bot))
