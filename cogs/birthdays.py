@@ -63,7 +63,7 @@ class Birthdays(commands.Cog):
                         title="🥳 Joyeux anniversaire !",
                         description=(
                             f"🎂 **{user.mention}** fête son anniversaire aujourd’hui !\n\n"
-                            f"📅 Date : **{date_formatee} ({date})**\n"
+                            f"📅 Date : **{date_formatee}**\n"
                             f"💌 Toute la communauté te souhaite une journée inoubliable !"
                         ),
                         color=discord.Color.gold()
@@ -82,9 +82,11 @@ class Birthdays(commands.Cog):
 
         if date is None:
             if user_id in birthdays:
+                jour, mois = map(int, birthdays[user_id].split("-"))
+                nom_mois = datetime(2000, mois, jour).strftime("%B")
                 embed = discord.Embed(
                     title="🎂 Ton anniversaire",
-                    description=f"Tu as enregistré la date : **{birthdays[user_id]}**",
+                    description=f"Tu as enregistré la date : **{jour:02d} {nom_mois}**",
                     color=discord.Color.blue()
                 )
                 return await ctx.send(embed=embed)
@@ -109,9 +111,10 @@ class Birthdays(commands.Cog):
 
         birthdays[user_id] = date
         self.save_birthdays(birthdays)
+        nom_mois = datetime(2000, mois, jour).strftime("%B")
         embed = discord.Embed(
             title="✅ Anniversaire enregistré !",
-            description=f"Ton anniversaire a été enregistré/modifié pour le **{date}** 🎂",
+            description=f"Ton anniversaire a été enregistré/modifié pour le **{jour:02d} {nom_mois}** 🎂",
             color=discord.Color.green()
         )
         await ctx.send(embed=embed)
@@ -152,7 +155,7 @@ class Birthdays(commands.Cog):
                 date_full = datetime(today.year, mois, jour)
                 if date_full < today:
                     date_full = date_full.replace(year=today.year + 1)
-                upcoming.append((user_id, date_full, date_str))
+                upcoming.append((user_id, date_full, jour, mois))
             except:
                 continue
 
@@ -172,13 +175,13 @@ class Birthdays(commands.Cog):
             color=discord.Color.blurple()
         )
 
-        for user_id, d, raw_date in top_20:
+        for user_id, d, jour, mois in top_20:
             try:
                 user = await self.bot.fetch_user(int(user_id))
-                date_formatted = d.strftime("%d %B")
+                nom_mois = datetime(2000, mois, jour).strftime("%B")
                 embed.add_field(
                     name=user.display_name,
-                    value=f"🎂 {date_formatted} ({raw_date})",
+                    value=f"🎂 {jour:02d} {nom_mois}",
                     inline=False
                 )
             except:
