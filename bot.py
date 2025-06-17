@@ -37,10 +37,8 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Ce listener NE gère que le help custom, puis laisse le reste aux autres cogs via process_commands.
     if message.author.bot:
         return
-    # Si tu veux un !help custom, il se gère ICI (sinon, laisse le cog help_cog gérer tout seul)
     contenu = message.content.strip()
     if contenu.startswith("!help"):
         ctx = await bot.get_context(message)
@@ -48,11 +46,13 @@ async def on_message(message: discord.Message):
         if cmd:
             await ctx.invoke(cmd)
             return
-    await bot.process_commands(message)  # NE PAS SUPPRIMER, sinon les autres cogs ne reçoivent pas les commandes
+    await bot.process_commands(message)
 
+# ✅ FIX ici : utilise le bon contexte async
 async def main():
-    await load_cogs()
-    await bot.start(TOKEN)
+    async with bot:
+        await load_cogs()
+        await bot.start(TOKEN)
 
 if __name__ == "__main__":
     import asyncio
