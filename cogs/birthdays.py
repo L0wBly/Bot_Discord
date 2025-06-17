@@ -23,8 +23,15 @@ class Birthdays(commands.Cog):
             with open(self.birthday_file, "w", encoding="utf-8") as f:
                 json.dump({}, f)
             return {}
-        with open(self.birthday_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+
+        try:
+            with open(self.birthday_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("[Birthdays] Fichier JSON vide ou invalide. Remise à zéro.")
+            with open(self.birthday_file, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+            return {}
 
     def save_birthdays(self, birthdays):
         with open(self.birthday_file, "w", encoding="utf-8") as f:
@@ -98,9 +105,7 @@ class Birthdays(commands.Cog):
         """Affiche les 20 prochains anniversaires à venir"""
         birthdays = self.load_birthdays()
         today = datetime.now(pytz.timezone("Europe/Paris"))
-        today_mmdd = today.strftime("%m-%d")
 
-        # Crée une liste (user_id, date complète) triée
         upcoming = []
         for user_id, date_str in birthdays.items():
             try:
@@ -111,7 +116,6 @@ class Birthdays(commands.Cog):
             except:
                 continue
 
-        # Trie et prend les 20 premiers
         upcoming.sort(key=lambda x: x[1])
         top_20 = upcoming[:20]
 
