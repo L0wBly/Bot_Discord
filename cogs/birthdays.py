@@ -8,6 +8,12 @@ import pytz
 from config import BIRTHDAY_CHANNEL_ID
 from utils.logger import logger
 
+# Mois en français (manuels pour éviter l'anglais de strftime)
+MOIS_FR = [
+    "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre"
+]
+
 class Birthdays(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -57,13 +63,13 @@ class Birthdays(commands.Cog):
                 try:
                     user = await self.bot.fetch_user(int(user_id))
                     jour, mois = map(int, date.split("-"))
-                    date_formatee = datetime(2000, mois, jour).strftime("%d %B")
+                    nom_mois = MOIS_FR[mois - 1]
 
                     embed = discord.Embed(
                         title="🥳 Joyeux anniversaire !",
                         description=(
                             f"🎂 **{user.mention}** fête son anniversaire aujourd’hui !\n\n"
-                            f"📅 Date : **{date_formatee}**\n"
+                            f"📅 Date : **{jour:02d} {nom_mois}**\n"
                             f"💌 Toute la communauté te souhaite une journée inoubliable !"
                         ),
                         color=discord.Color.gold()
@@ -83,7 +89,7 @@ class Birthdays(commands.Cog):
         if date is None:
             if user_id in birthdays:
                 jour, mois = map(int, birthdays[user_id].split("-"))
-                nom_mois = datetime(2000, mois, jour).strftime("%B")
+                nom_mois = MOIS_FR[mois - 1]
                 embed = discord.Embed(
                     title="🎂 Ton anniversaire",
                     description=f"Tu as enregistré la date : **{jour:02d} {nom_mois}**",
@@ -111,7 +117,7 @@ class Birthdays(commands.Cog):
 
         birthdays[user_id] = date
         self.save_birthdays(birthdays)
-        nom_mois = datetime(2000, mois, jour).strftime("%B")
+        nom_mois = MOIS_FR[mois - 1]
         embed = discord.Embed(
             title="✅ Anniversaire enregistré !",
             description=f"Ton anniversaire a été enregistré/modifié pour le **{jour:02d} {nom_mois}** 🎂",
@@ -178,7 +184,7 @@ class Birthdays(commands.Cog):
         for user_id, d, jour, mois in top_20:
             try:
                 user = await self.bot.fetch_user(int(user_id))
-                nom_mois = datetime(2000, mois, jour).strftime("%B")
+                nom_mois = MOIS_FR[mois - 1]
                 embed.add_field(
                     name=user.display_name,
                     value=f"🎂 {jour:02d} {nom_mois}",
