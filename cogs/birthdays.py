@@ -8,10 +8,17 @@ import pytz
 from config import BIRTHDAY_CHANNEL_ID
 from utils.logger import logger
 
+# Mois en français
 MOIS_FR = [
     "janvier", "février", "mars", "avril", "mai", "juin",
     "juillet", "août", "septembre", "octobre", "novembre", "décembre"
 ]
+
+# Décorateur pour restreindre l'exécution aux commandes dans le salon anniversaire
+def is_in_birthday_channel():
+    def predicate(ctx):
+        return ctx.channel.id == BIRTHDAY_CHANNEL_ID
+    return commands.check(predicate)
 
 class Birthdays(commands.Cog):
     def __init__(self, bot):
@@ -45,7 +52,7 @@ class Birthdays(commands.Cog):
     def get_today_date_paris(self):
         paris_tz = pytz.timezone("Europe/Paris")
         now = datetime.now(paris_tz)
-        return now.strftime("%d-%m")  # JJ-MM
+        return now.strftime("%d-%m")
 
     @tasks.loop(time=time(hour=8, minute=0))  # 08:00 UTC = 10:00 Paris
     async def check_birthdays(self):
@@ -80,6 +87,7 @@ class Birthdays(commands.Cog):
                     logger.error(f"[Birthdays] Erreur lors du message à {user_id} : {e}")
 
     @commands.command(name="anniv")
+    @is_in_birthday_channel()
     async def anniv(self, ctx, date: str = None):
         birthdays = self.load_birthdays()
         user_id = str(ctx.author.id)
@@ -124,6 +132,7 @@ class Birthdays(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="delanniv")
+    @is_in_birthday_channel()
     async def delanniv(self, ctx):
         birthdays = self.load_birthdays()
         user_id = str(ctx.author.id)
@@ -146,10 +155,10 @@ class Birthdays(commands.Cog):
             await ctx.send(embed=embed)
 
     @commands.command(name="annivs")
+    @is_in_birthday_channel()
     async def annivs(self, ctx):
         birthdays = self.load_birthdays()
 
-        # Corrigé : obtenir la date sans l'heure ni timezone
         now_paris = datetime.now(pytz.timezone("Europe/Paris"))
         today = datetime(now_paris.year, now_paris.month, now_paris.day)
 
