@@ -1,3 +1,7 @@
+# pip install -r requirements.txt
+# Requirements for the Discord bot project
+# This file lists all the dependencies required to run the bot.
+
 discord.py==2.3.2
 python-dotenv
 pytz
