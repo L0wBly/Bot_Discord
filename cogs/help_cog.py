@@ -16,7 +16,7 @@ class HelpCog(commands.Cog):
             color=discord.Color.blurple()
         )
 
-        # ID du rôle admin autorisé à tout voir
+        # Vérifie si l'utilisateur a le rôle admin
         has_admin_role = any(role.id == ADMIN_ROLE_ID for role in ctx.author.roles)
 
         for cog_name, cog in self.bot.cogs.items():
@@ -40,7 +40,11 @@ class HelpCog(commands.Cog):
                     inline=False
                 )
 
-        await ctx.send(embed=embed)
+        message = await ctx.send(embed=embed)
+
+        # Supprimer le message après 3 minutes si admin
+        if has_admin_role:
+            await message.delete(delay=180)
 
     @commands.command(name="helpjeu")
     async def helpjeu_cmd(self, ctx):
