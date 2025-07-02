@@ -25,9 +25,11 @@ class Birthdays(commands.Cog):
         self.bot = bot
         self.birthday_file = os.path.join("data", "birthdays.json")
         self.check_birthdays.start()
+        self.daily_clear_and_help.start()
 
     def cog_unload(self):
         self.check_birthdays.cancel()
+        self.daily_clear_and_help.cancel()
 
     def load_birthdays(self):
         os.makedirs("data", exist_ok=True)
@@ -53,6 +55,9 @@ class Birthdays(commands.Cog):
         paris_tz = pytz.timezone("Europe/Paris")
         now = datetime.now(paris_tz)
         return now.strftime("%d-%m")
+
+    def get_paris_time_now(self):
+        return datetime.now(pytz.timezone("Europe/Paris"))
 
     @tasks.loop(time=time(hour=8, minute=0))  # 08:00 UTC = 10:00 Paris
     async def check_birthdays(self):
@@ -85,6 +90,36 @@ class Birthdays(commands.Cog):
                     await channel.send(content=user.mention, embed=embed)
                 except Exception as e:
                     logger.error(f"[Birthdays] Erreur lors du message à {user_id} : {e}")
+
+    @tasks.loop(time=time(hour=15, minute=30))  # 15:30 UTC = 17:30 Paris
+    async def daily_clear_and_help(self):
+        channel = self.bot.get_channel(BIRTHDAY_CHANNEL_ID)
+        if channel is None:
+            logger.warning("[Birthdays] Salon d'anniversaire introuvable pour le clear.")
+            return
+
+        try:
+            await channel.purge(limit=100, check=lambda m: not m.pinned)
+            logger.info("[Birthdays] Messages du salon anniversaire supprimés.")
+
+            embed = discord.Embed(
+                title="📌 Commandes disponibles dans ce salon",
+                description=(
+                    "Voici les commandes que tu peux utiliser ici :\n\n"
+                    "🎂 `!anniv JJ-MM` — Enregistrer ou modifier ta date d'anniversaire\n"
+                    "📅 `!anniv` — Voir ta date enregistrée\n"
+                    "🗑️ `!delanniv` — Supprimer ta date d'anniversaire\n"
+                    "🔮 `!annivs` — Voir les 20 prochains anniversaires"
+                ),
+                color=discord.Color.teal()
+            )
+            embed.set_footer(text="Utilise les commandes directement ici !")
+
+            await channel.send(embed=embed)
+            logger.info("[Birthdays] Message de commandes envoyé après nettoyage.")
+
+        except Exception as e:
+            logger.error(f"[Birthdays] Erreur lors du clear ou de l'affichage des commandes : {e}")
 
     @commands.command(name="anniv")
     @is_in_birthday_channel()
@@ -159,7 +194,7 @@ class Birthdays(commands.Cog):
     async def annivs(self, ctx):
         birthdays = self.load_birthdays()
 
-        now_paris = datetime.now(pytz.timezone("Europe/Paris"))
+        now_paris = self.get_paris_time_now()
         today = datetime(now_paris.year, now_paris.month, now_paris.day)
 
         upcoming = []
