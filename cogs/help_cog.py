@@ -28,12 +28,15 @@ class HelpCog(commands.Cog):
             title="📌 Commandes disponibles",
             description=(
                 "Utilise les commandes suivantes :\n\n"
+                "> ❓ `!help` → Affiche les commandes générales\n"
+                "> 🎮 `!helpjeu` → Affiche les commandes du jeu\n"
                 "> 🎂 `!anniv JJ-MM` → Enregistre ta date d'anniversaire\n"
                 "> 📅 `!anniv` → Affiche ta date actuelle\n"
                 "> 🗑️ `!delanniv` → Supprime ton anniversaire\n"
                 "> 🔮 `!annivs` → Liste les 20 anniversaires à venir\n"
                 "> 📊 `!classement` → Classement du serveur\n"
                 "> 🎮 `!guess` → Devine un personnage d’anime"
+                "> 🗑️ `!clear` → Supprime tes propres messages\n"
             ),
             color=discord.Color.teal()
         )
