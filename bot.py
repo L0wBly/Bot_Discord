@@ -1,26 +1,26 @@
 import os
+import sys
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import traceback  # ⬅️ nécessaire pour afficher les erreurs complètes
+import traceback
 
 from utils.logger import logger
+
+# 🔒 Ne lancer que via systemd
+if os.getenv("INVOCATION_BY_SYSTEMD") != "1":
+    print("❌ Ce bot ne peut être lancé qu'en tant que service systemd.")
+    sys.exit(1)
 
 # Chargement du token et configuration
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Intents complets pour toutes les fonctionnalités du bot
 intents = discord.Intents.all()
-
-# Commande prefix (ici "!")
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 bot.remove_command("help")
 
 async def load_cogs():
-    """
-    Charge dynamiquement chaque extension/cog du dossier cogs/
-    """
     cogs_folder = os.path.join(os.path.dirname(__file__), "cogs")
     for filename in os.listdir(cogs_folder):
         if not filename.endswith(".py") or filename.startswith("_"):
