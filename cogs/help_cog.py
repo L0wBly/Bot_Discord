@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 
+from config import ADMIN_ROLE_ID
+
 class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -14,9 +16,15 @@ class HelpCog(commands.Cog):
             color=discord.Color.blurple()
         )
 
+        # ID du rôle admin autorisé à tout voir
+        has_admin_role = any(role.id == ADMIN_ROLE_ID for role in ctx.author.roles)
+
         for cog_name, cog in self.bot.cogs.items():
             if cog_name.lower() == "jeu":
-                continue  # On ignore le cog de jeu ici
+                continue
+
+            if cog_name.lower() in ["rolestats", "reactionroles"] and not has_admin_role:
+                continue  # Masque ce cog pour les non-admins
 
             command_list = []
             for command in cog.get_commands():
