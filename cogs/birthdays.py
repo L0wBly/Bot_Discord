@@ -127,7 +127,7 @@ class Birthdays(commands.Cog):
         except Exception as e:
             logger.error(f"[Birthdays] Erreur lors du clear ou de l'affichage des commandes : {e}")
 
-    @commands.command(name="anniv")
+    @commands.command(name="anniv", help="Affiche notre date d'anniversaire ou l'enregistre.")
     @is_in_birthday_channel()
     async def anniv(self, ctx, date: str = None):
         birthdays = self.load_birthdays()
@@ -172,7 +172,7 @@ class Birthdays(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name="delanniv")
+    @commands.command(name="delanniv" , help="Supprime ton anniversaire enregistré.")
     @is_in_birthday_channel()
     async def delanniv(self, ctx):
         birthdays = self.load_birthdays()
@@ -195,7 +195,7 @@ class Birthdays(commands.Cog):
             )
             await ctx.send(embed=embed)
 
-    @commands.command(name="annivs")
+    @commands.command(name="annivs", help="Affiche les 20 anniversaires à venir.")
     @is_in_birthday_channel()
     async def annivs(self, ctx):
         birthdays = self.load_birthdays()
