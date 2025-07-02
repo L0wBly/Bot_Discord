@@ -11,7 +11,7 @@ class HelpCog(commands.Cog):
     def cog_unload(self):
         self.auto_clear_command_channel.cancel()
 
-    @tasks.loop(hours=0.05)
+    @tasks.loop(minute=1)
     async def auto_clear_command_channel(self):
         channel = self.bot.get_channel(COMMAND_CHANNEL_ID)
         if not channel:
