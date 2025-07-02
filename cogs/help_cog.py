@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+import asyncio
 
 from config import ADMIN_ROLE_ID, COMMAND_CHANNEL_ID
 
@@ -11,7 +12,7 @@ class HelpCog(commands.Cog):
     def cog_unload(self):
         self.auto_clear_command_channel.cancel()
 
-    @tasks.loop(minutes=60)
+    @tasks.loop(hours=1)
     async def auto_clear_command_channel(self):
         channel = self.bot.get_channel(COMMAND_CHANNEL_ID)
         if not channel:
@@ -54,12 +55,6 @@ class HelpCog(commands.Cog):
 
         has_admin_role = any(role.id == ADMIN_ROLE_ID for role in ctx.author.roles)
 
-        try:
-            await ctx.channel.purge(limit=1000, check=lambda m: not m.pinned)
-        except discord.Forbidden:
-            await ctx.send("Je n'ai pas la permission de nettoyer ce salon.")
-            return
-
         for cog_name, cog in self.bot.cogs.items():
             if cog_name.lower() == "jeu":
                 continue
@@ -81,9 +76,17 @@ class HelpCog(commands.Cog):
                 )
 
         message = await ctx.send(embed=embed)
+
         if has_admin_role:
-            await message.delete(delay=180)
-            await ctx.message.delete(delay=180)
+            await asyncio.sleep(180)
+            try:
+                await ctx.message.delete()
+            except discord.Forbidden:
+                pass
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                pass
 
     @commands.command(name="helpjeu")
     async def helpjeu_cmd(self, ctx):
