@@ -35,7 +35,7 @@ class HelpCog(commands.Cog):
                 "> 🗑️ `!delanniv` → Supprime ton anniversaire\n"
                 "> 🔮 `!annivs` → Liste les 20 anniversaires à venir\n"
                 "> 📊 `!classement` → Classement du serveur\n"
-                "> 🎮 `!guess` → Devine un personnage d’anime"
+                "> 🎮 `!guess` → Devine un personnage d’anime\n"
                 "> 🗑️ `!clear` → Supprime tes propres messages\n"
             ),
             color=discord.Color.teal()
