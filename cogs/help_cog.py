@@ -1,11 +1,47 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from config import ADMIN_ROLE_ID
+from config import ADMIN_ROLE_ID, COMMAND_CHANNEL_ID
 
 class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.auto_clear_command_channel.start()
+
+    def cog_unload(self):
+        self.auto_clear_command_channel.cancel()
+
+    @tasks.loop(hours=0.05)
+    async def auto_clear_command_channel(self):
+        channel = self.bot.get_channel(COMMAND_CHANNEL_ID)
+        if not channel:
+            return
+
+        try:
+            await channel.purge(limit=1000, check=lambda m: not m.pinned)
+        except discord.Forbidden:
+            print("Permissions insuffisantes pour nettoyer le salon de commandes.")
+            return
+
+        embed = discord.Embed(
+            title="📌 Commandes disponibles",
+            description=(
+                "Utilise les commandes suivantes :\n\n"
+                "> 🎂 `!anniv JJ-MM` → Enregistre ta date d'anniversaire\n"
+                "> 📅 `!anniv` → Affiche ta date actuelle\n"
+                "> 🗑️ `!delanniv` → Supprime ton anniversaire\n"
+                "> 🔮 `!annivs` → Liste les 20 anniversaires à venir\n"
+                "> 📊 `!classement` → Classement du serveur\n"
+                "> 🎮 `!guess` → Devine un personnage d’anime"
+            ),
+            color=discord.Color.teal()
+        )
+        embed.set_footer(text="Tape une commande ci-dessus pour l'utiliser.")
+        await channel.send(embed=embed)
+
+    @auto_clear_command_channel.before_loop
+    async def before_clear(self):
+        await self.bot.wait_until_ready()
 
     @commands.command(name="help")
     async def help_cmd(self, ctx):
@@ -16,15 +52,19 @@ class HelpCog(commands.Cog):
             color=discord.Color.blurple()
         )
 
-        # Vérifie si l'utilisateur a le rôle admin
         has_admin_role = any(role.id == ADMIN_ROLE_ID for role in ctx.author.roles)
+
+        try:
+            await ctx.channel.purge(limit=1000, check=lambda m: not m.pinned)
+        except discord.Forbidden:
+            await ctx.send("Je n'ai pas la permission de nettoyer ce salon.")
+            return
 
         for cog_name, cog in self.bot.cogs.items():
             if cog_name.lower() == "jeu":
                 continue
-
             if cog_name.lower() in ["rolestats", "reactionroles"] and not has_admin_role:
-                continue  # Masque ce cog pour les non-admins
+                continue
 
             command_list = []
             for command in cog.get_commands():
@@ -41,12 +81,9 @@ class HelpCog(commands.Cog):
                 )
 
         message = await ctx.send(embed=embed)
-
-        # Supprimer aussi le message d'origine s'il est admin
         if has_admin_role:
             await message.delete(delay=180)
             await ctx.message.delete(delay=180)
-
 
     @commands.command(name="helpjeu")
     async def helpjeu_cmd(self, ctx):
