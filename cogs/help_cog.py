@@ -42,9 +42,11 @@ class HelpCog(commands.Cog):
 
         message = await ctx.send(embed=embed)
 
-        # Supprimer le message après 3 minutes si admin
+        # Supprimer aussi le message d'origine s'il est admin
         if has_admin_role:
             await message.delete(delay=180)
+            await ctx.message.delete(delay=180)
+
 
     @commands.command(name="helpjeu")
     async def helpjeu_cmd(self, ctx):

@@ -40,13 +40,15 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
-    contenu = message.content.strip()
-    if contenu.startswith("!help"):
+
+    contenu = message.content.strip().lower()
+    if contenu == "!help":
         ctx = await bot.get_context(message)
         cmd = bot.get_command("help")
         if cmd:
             await ctx.invoke(cmd)
             return
+
     await bot.process_commands(message)
 
 async def main():
