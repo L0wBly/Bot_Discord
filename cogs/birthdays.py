@@ -103,17 +103,22 @@ class Birthdays(commands.Cog):
             logger.info("[Birthdays] Messages du salon anniversaire supprimés.")
 
             embed = discord.Embed(
-            title="📌 Commandes disponibles",
-            color=discord.Color.teal(),
-            description=(
-                "Utilise les commandes suivantes :\n\n"
-                "> 🎂 `!anniv JJ-MM` → Enregistre ta date d'anniversaire\n"
-                "> 📅 `!anniv` → Affiche ta date actuelle\n"
-                "> 🗑️ `!delanniv` → Supprime ton anniversaire\n"
-                "> 🔮 `!annivs` → Liste les 20 anniversaires à venir"
+                title="📌 Commandes disponibles dans ce salon",
+                color=discord.Color.teal(),
+                description=(
+                    "Voici les commandes que tu peux utiliser ici :\n\n"
+                    "🎂 **`!anniv JJ-MM`**\n"
+                    "→ Enregistre ou modifie ta date d'anniversaire\n\n"
+                    "📅 **`!anniv`**\n"
+                    "→ Affiche ta date enregistrée\n\n"
+                    "🗑️ **`!delanniv`**\n"
+                    "→ Supprime ton anniversaire\n\n"
+                    "🔮 **`!annivs`**\n"
+                    "→ Affiche les 20 prochains anniversaires"
+                )
             )
-            )
-            embed.set_footer(text="Tape une commande ci-dessus pour l'utiliser.")
+            embed.set_footer(text="Utilise l’une des commandes ci-dessus directement ici 🎉")
+
 
 
             await channel.send(embed=embed)
