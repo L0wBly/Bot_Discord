@@ -68,13 +68,13 @@ class BumpReminder(commands.Cog):
         if time_since_bump < BUMP_COOLDOWN:
             return
 
-        # Supprimer le rappel précédent s'il a +1h
+        # Supprimer le rappel précédent s'il a +3h
         if self.last_reminder_msg_id:
             try:
                 reminder_msg = await channel.fetch_message(self.last_reminder_msg_id)
-                if (now - reminder_msg.created_at.replace(tzinfo=timezone.utc)).total_seconds() >= 3600:
+                if (now - reminder_msg.created_at.replace(tzinfo=timezone.utc)).total_seconds() >= 10800: # 3 heures
                     await reminder_msg.delete()
-                    logger.info("Rappel automatique supprimé après 1h sans bump.")
+                    logger.info("Rappel automatique supprimé après 3h sans bump.")
                     self.last_reminder_msg_id = None
             except discord.NotFound:
                 self.last_reminder_msg_id = None
