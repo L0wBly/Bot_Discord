@@ -91,7 +91,7 @@ class Birthdays(commands.Cog):
                 except Exception as e:
                     logger.error(f"[Birthdays] Erreur lors du message à {user_id} : {e}")
 
-    @tasks.loop(time=time(hour=16, minute=35))  # 15:30 UTC = 17:30 Paris
+    @tasks.loop(time=time(hour=16, minute=42))  # 15:30 UTC = 17:30 Paris
     async def daily_clear_and_help(self):
         channel = self.bot.get_channel(BIRTHDAY_CHANNEL_ID)
         if channel is None:
