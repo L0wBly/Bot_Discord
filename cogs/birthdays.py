@@ -91,7 +91,7 @@ class Birthdays(commands.Cog):
                 except Exception as e:
                     logger.error(f"[Birthdays] Erreur lors du message à {user_id} : {e}")
 
-    @tasks.loop(time=time(hour=15, minute=30))  # 15:30 UTC = 17:30 Paris
+    @tasks.loop(time=time(hour=16, minute=35))  # 15:30 UTC = 17:30 Paris
     async def daily_clear_and_help(self):
         channel = self.bot.get_channel(BIRTHDAY_CHANNEL_ID)
         if channel is None:
@@ -99,21 +99,22 @@ class Birthdays(commands.Cog):
             return
 
         try:
-            await channel.purge(limit=100, check=lambda m: not m.pinned)
+            await channel.purge(limit=10000, check=lambda m: not m.pinned)
             logger.info("[Birthdays] Messages du salon anniversaire supprimés.")
 
             embed = discord.Embed(
-                title="📌 Commandes disponibles dans ce salon",
-                description=(
-                    "Voici les commandes que tu peux utiliser ici :\n\n"
-                    "🎂 `!anniv JJ-MM` — Enregistrer ou modifier ta date d'anniversaire\n"
-                    "📅 `!anniv` — Voir ta date enregistrée\n"
-                    "🗑️ `!delanniv` — Supprimer ta date d'anniversaire\n"
-                    "🔮 `!annivs` — Voir les 20 prochains anniversaires"
-                ),
-                color=discord.Color.teal()
+            title="📌 Commandes disponibles",
+            color=discord.Color.teal(),
+            description=(
+                "Utilise les commandes suivantes :\n\n"
+                "> 🎂 `!anniv JJ-MM` → Enregistre ta date d'anniversaire\n"
+                "> 📅 `!anniv` → Affiche ta date actuelle\n"
+                "> 🗑️ `!delanniv` → Supprime ton anniversaire\n"
+                "> 🔮 `!annivs` → Liste les 20 anniversaires à venir"
             )
-            embed.set_footer(text="Utilise les commandes directement ici !")
+            )
+            embed.set_footer(text="Tape une commande ci-dessus pour l'utiliser.")
+
 
             await channel.send(embed=embed)
             logger.info("[Birthdays] Message de commandes envoyé après nettoyage.")
