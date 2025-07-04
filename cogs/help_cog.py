@@ -25,22 +25,23 @@ class HelpCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="📌 Commandes disponibles",
-            description=(
-                "Utilise les commandes suivantes :\n\n"
-                "> ❓ `!help` → Affiche les commandes générales\n"
-                "> 🎮 `!helpjeu` → Affiche les commandes du jeu\n"
-                "> 🎂 `!anniv JJ-MM` → Enregistre ta date d'anniversaire\n"
-                "> 📅 `!anniv` → Affiche ta date actuelle\n"
-                "> 🗑️ `!delanniv` → Supprime ton anniversaire\n"
-                "> 🔮 `!annivs` → Liste les 20 anniversaires à venir\n"
-                "> 📊 `!classement` → Classement du serveur\n"
-                "> 🎮 `!guess` → Devine un personnage d’anime\n"
-                "> 🗑️ `!clear` → Supprime tes propres messages\n"
-            ),
+            title="📌 Commandes disponibles dans ce salon",
+            description="Voici les commandes que tu peux utiliser ici :",
             color=discord.Color.teal()
         )
-        embed.set_footer(text="Tape une commande ci-dessus pour l'utiliser.")
+
+        embed.add_field(name="❓ `!help`", value="→ Affiche les commandes générales", inline=False)
+        embed.add_field(name="🎮 `!helpjeu`", value="→ Affiche les commandes du jeu", inline=False)
+        embed.add_field(name="🎂 `!anniv JJ-MM`", value="→ Enregistre ta date d'anniversaire", inline=False)
+        embed.add_field(name="📅 `!anniv`", value="→ Affiche ta date actuelle", inline=False)
+        embed.add_field(name="🗑️ `!delanniv`", value="→ Supprime ton anniversaire", inline=False)
+        embed.add_field(name="🔮 `!annivs`", value="→ Liste les 20 anniversaires à venir", inline=False)
+        embed.add_field(name="📊 `!classement`", value="→ Classement du serveur", inline=False)
+        embed.add_field(name="🎮 `!guess`", value="→ Devine un personnage d’anime", inline=False)
+        embed.add_field(name="🧹 `!clear`", value="→ Supprime tes propres messages", inline=False)
+
+        embed.set_footer(text="Utilise l'une des commandes ci-dessus directement ici 🎉")
+
         await channel.send(embed=embed)
 
     @auto_clear_command_channel.before_loop
@@ -95,7 +96,7 @@ class HelpCog(commands.Cog):
     async def helpjeu_cmd(self, ctx):
         """Affiche les commandes du jeu uniquement."""
         embed = discord.Embed(
-            title="🧠 Commandes du jeu",
+            title="🎮 Commandes du jeu",
             description="Voici les commandes disponibles pour les modules de jeu :",
             color=discord.Color.orange()
         )
@@ -121,7 +122,7 @@ class HelpCog(commands.Cog):
                 )
 
         if not jeux_commands_found:
-            embed.description = "Aucune commande de jeu trouvée. Assurez-vous que les cogs de jeu ont name=\"Jeu\"."
+            embed.description = "Aucune commande de jeu trouvée. Assurez-vous que les cogs de jeu ont `name=\"Jeu\"`."
 
         await ctx.send(embed=embed)
 
