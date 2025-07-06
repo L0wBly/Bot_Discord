@@ -39,6 +39,8 @@ class HelpCog(commands.Cog):
         embed.add_field(name="📊 `!classement`", value="→ Classement du serveur", inline=False)
         embed.add_field(name="🎮 `!guess`", value="→ Devine un personnage d’anime", inline=False)
         embed.add_field(name="🧹 `!clear`", value="→ Supprime tes propres messages", inline=False)
+        embed.add_field(name="🧹 `!ville [ta ville]`", value="→ Enregistre ta ville pour la météo quotidienne", inline=False)
+        embed.add_field(name="🧹 `!delville`", value="→ Supprime ta ville pour la météo quotidienne", inline=False)
 
         embed.set_footer(text="Utilise l'une des commandes ci-dessus directement ici 🎉")
 
