@@ -1,3 +1,5 @@
+# bot.py
+
 import os
 import sys
 import discord
@@ -6,16 +8,14 @@ from dotenv import load_dotenv
 import traceback
 
 from utils.logger import logger
+from config import DISCORD_TOKEN
 
 # 🔒 Ne lancer que via systemd
 if os.getenv("INVOCATION_BY_SYSTEMD") != "1":
     print("❌ Ce bot ne peut être lancé qu'en tant que service systemd.")
     sys.exit(1)
 
-# Chargement du token et configuration
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-
+# Chargement des intents Discord
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 bot.remove_command("help")
@@ -54,7 +54,7 @@ async def on_message(message: discord.Message):
 async def main():
     async with bot:
         await load_cogs()
-        await bot.start(TOKEN)
+        await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
     import asyncio
