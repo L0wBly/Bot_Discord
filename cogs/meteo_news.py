@@ -22,7 +22,7 @@ class UserCityWeather(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        self.daily_weather_and_news.change_interval(time=time(hour=6, minute=0, tzinfo=pytz.utc))
+        self.daily_weather_and_news.change_interval(time=time(hour=9, minute=20, tzinfo=pytz.utc))
         self.daily_weather_and_news.start()
 
     def cog_unload(self):
