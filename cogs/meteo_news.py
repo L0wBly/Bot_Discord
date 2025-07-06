@@ -42,7 +42,7 @@ class UserCityWeather(commands.Cog):
         cities[user_id] = city
         self.save_city_data(cities)
 
-        confirm = await ctx.send(f"✅ Ta ville **{city}** a bien été enregistrée pour la météo quotidienne !")
+        confirm = await ctx.send(f"✅ Ta ville a bien été enregistrée pour la météo quotidienne !")
         await confirm.delete(delay=5)
 
     @commands.command(name="delville")
