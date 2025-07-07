@@ -1,11 +1,11 @@
-# cogs/user_city_weather.py
+# ✅ Fichier corrigé : cogs/user_city_weather.py
 
 import discord
 from discord.ext import commands, tasks
 import aiohttp
 import json
 import os
-from datetime import datetime, time
+from datetime import datetime, time as dtime
 import pytz
 from urllib.parse import quote
 
@@ -13,9 +13,10 @@ from config import (
     WEATHER_API_KEY,
     NEWS_API_KEY,
     NEWS_COUNTRY,
-    NEWS_CATEGORY,
-    CHANNEL_ID_METEO_NEWS
+    NEWS_CATEGORY
 )
+
+from utils.logger import logger  # <--- pour les logs 
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
@@ -23,17 +24,17 @@ class UserCityWeather(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        self.daily_weather_and_news.change_interval(time=time(hour=9, minute=20, tzinfo=pytz.utc))
+        self.daily_weather_and_news.change_interval(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))
         self.daily_weather_and_news.start()
+        logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
 
     def cog_unload(self):
         self.daily_weather_and_news.cancel()
+        logger.info("[UserCityWeather] Tâche arrêtée")
 
     @commands.command(name="ville")
     async def set_city(self, ctx, *, city: str):
-        """Permet d'enregistrer ta ville pour la météo quotidienne."""
         user_id = str(ctx.author.id)
-
         try:
             await ctx.message.delete()
         except discord.Forbidden:
@@ -45,12 +46,11 @@ class UserCityWeather(commands.Cog):
 
         confirm = await ctx.send(f"✅ Ta ville **{city}** a bien été enregistrée pour la météo quotidienne !")
         await confirm.delete(delay=5)
+        logger.info(f"[UserCityWeather] Ville enregistrée pour {ctx.author} : {city}")
 
     @commands.command(name="delville")
     async def delete_city(self, ctx):
-        """Supprime la ville enregistrée pour la météo quotidienne."""
         user_id = str(ctx.author.id)
-
         try:
             await ctx.message.delete()
         except discord.Forbidden:
@@ -68,7 +68,6 @@ class UserCityWeather(commands.Cog):
 
     @commands.command(name="meteo")
     async def force_meteo(self, ctx):
-        """Force l'envoi de ta météo + actus (commande de test)."""
         user_id = str(ctx.author.id)
         cities = self.load_city_data()
 
@@ -97,7 +96,7 @@ class UserCityWeather(commands.Cog):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    @tasks.loop(time=time(hour=6, minute=0, tzinfo=pytz.utc))  # 6h UTC = 8h Paris
+    @tasks.loop(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))
     async def daily_weather_and_news(self):
         cities = self.load_city_data()
         embed = await self.build_news_embed()
@@ -111,28 +110,25 @@ class UserCityWeather(commands.Cog):
                 if icon_url:
                     personalized_embed.set_thumbnail(url=icon_url)
                 await user.send(embed=personalized_embed)
+                logger.info(f"[UserCityWeather] Météo envoyée à {user} pour {city}")
             except Exception as e:
-                print(f"Erreur en envoyant à {user_id} : {e}")
+                logger.error(f"[UserCityWeather] Erreur pour {user_id} ({city}) : {e}")
 
     async def get_weather_text(self, city):
-        print(f"[DEBUG] get_weather_text() appelé avec : {city}") 
+        encoded_city = quote(city)
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={encoded_city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
+
         async with aiohttp.ClientSession() as session:
-            encoded_city = quote(city)
-            url = f"http://api.openweathermap.org/data/2.5/weather?q={encoded_city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
             async with session.get(url) as resp:
                 try:
                     data = await resp.json()
                 except Exception as e:
-                    print(f"[Météo] Erreur JSON pour '{city}' : {e}")
-                    return "Erreur de décodage de la réponse météo.", None
+                    logger.warning(f"[Météo] Erreur JSON pour '{city}' : {e}")
+                    return "Erreur de réponse de l'API météo.", None
 
-                print(f"[Météo] Réponse brute pour '{city}' : {data}")
+                logger.debug(f"[Météo] Réponse brute pour '{city}' : {data}")
 
-                if resp.status != 200:
-                    print(f"[Météo] Erreur API {resp.status} pour '{city}'")
-                    return "Ville introuvable ou erreur météo.", None
-
-                if "main" not in data:
+                if resp.status != 200 or "main" not in data:
                     return "Ville introuvable ou erreur météo.", None
 
                 temp = data['main']['temp']
