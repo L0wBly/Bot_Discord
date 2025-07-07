@@ -7,6 +7,7 @@ import json
 import os
 from datetime import datetime, time
 import pytz
+from urllib.parse import quote
 
 from config import (
     WEATHER_API_KEY,
@@ -42,7 +43,7 @@ class UserCityWeather(commands.Cog):
         cities[user_id] = city
         self.save_city_data(cities)
 
-        confirm = await ctx.send(f"✅ Ta ville a bien été enregistrée pour la météo quotidienne !")
+        confirm = await ctx.send(f"✅ Ta ville **{city}** a bien été enregistrée pour la météo quotidienne !")
         await confirm.delete(delay=5)
 
     @commands.command(name="delville")
@@ -64,6 +65,26 @@ class UserCityWeather(commands.Cog):
             confirm = await ctx.send("❌ Tu n'avais pas encore enregistré de ville.")
 
         await confirm.delete(delay=5)
+
+    @commands.command(name="meteo")
+    async def force_meteo(self, ctx):
+        """Force l'envoi de ta météo + actus (commande de test)."""
+        user_id = str(ctx.author.id)
+        cities = self.load_city_data()
+
+        if user_id not in cities:
+            await ctx.send("❌ Tu n'as pas encore enregistré de ville avec `!ville`.")
+            return
+
+        city = cities[user_id]
+        weather_text, icon_url = await self.get_weather_text(city)
+        embed = await self.build_news_embed()
+        embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
+
+        if icon_url:
+            embed.set_thumbnail(url=icon_url)
+
+        await ctx.send(embed=embed)
 
     def load_city_data(self):
         if not os.path.exists(DATA_FILE):
@@ -95,7 +116,8 @@ class UserCityWeather(commands.Cog):
 
     async def get_weather_text(self, city):
         async with aiohttp.ClientSession() as session:
-            url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
+            encoded_city = quote(city)
+            url = f"http://api.openweathermap.org/data/2.5/weather?q={encoded_city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
             async with session.get(url) as resp:
                 data = await resp.json()
                 if resp.status != 200 or "main" not in data:
