@@ -126,7 +126,7 @@ class UserCityWeather(commands.Cog):
                     return "Ville introuvable ou erreur météo.", None
 
                 if "main" not in data:
-                    print(f"[Météo] Réponse inattendue pour '{city}' : {data}")
+                    print(f"[Météo] Données incomplètes pour '{city}' : {data}")
                     return "Ville introuvable ou erreur météo.", None
 
                 temp = data['main']['temp']
