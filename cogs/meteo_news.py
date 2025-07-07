@@ -115,6 +115,7 @@ class UserCityWeather(commands.Cog):
                 print(f"Erreur en envoyant à {user_id} : {e}")
 
     async def get_weather_text(self, city):
+        print(f"[DEBUG] get_weather_text() appelé avec : {city}") 
         async with aiohttp.ClientSession() as session:
             encoded_city = quote(city)
             url = f"http://api.openweathermap.org/data/2.5/weather?q={encoded_city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
