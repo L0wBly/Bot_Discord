@@ -120,8 +120,15 @@ class UserCityWeather(commands.Cog):
             url = f"http://api.openweathermap.org/data/2.5/weather?q={encoded_city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
             async with session.get(url) as resp:
                 data = await resp.json()
-                if resp.status != 200 or "main" not in data:
+
+                if resp.status != 200:
+                    print(f"[Météo] Erreur API {resp.status} pour '{city}' : {data}")
                     return "Ville introuvable ou erreur météo.", None
+
+                if "main" not in data:
+                    print(f"[Météo] Réponse inattendue pour '{city}' : {data}")
+                    return "Ville introuvable ou erreur météo.", None
+
                 temp = data['main']['temp']
                 desc = data['weather'][0]['description'].capitalize()
                 icon = data['weather'][0]['icon']
