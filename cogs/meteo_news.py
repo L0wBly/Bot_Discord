@@ -1,5 +1,3 @@
-# ✅ Fichier corrigé : cogs/user_city_weather.py
-
 import discord
 from discord.ext import commands, tasks
 import aiohttp
@@ -16,7 +14,7 @@ from config import (
     NEWS_CATEGORY
 )
 
-from utils.logger import logger  # <--- pour les logs 
+from utils.logger import logger  # Logger personnalisé
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
@@ -24,7 +22,7 @@ class UserCityWeather(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        self.daily_weather_and_news.change_interval(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))
+        self.daily_weather_and_news.change_interval(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))  # 8h Paris
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
 
@@ -63,7 +61,6 @@ class UserCityWeather(commands.Cog):
             confirm = await ctx.send("🗑️ Ta ville a bien été supprimée.")
         else:
             confirm = await ctx.send("❌ Tu n'avais pas encore enregistré de ville.")
-
         await confirm.delete(delay=5)
 
     @commands.command(name="meteo")
@@ -115,7 +112,7 @@ class UserCityWeather(commands.Cog):
                 logger.error(f"[UserCityWeather] Erreur pour {user_id} ({city}) : {e}")
 
     async def get_weather_text(self, city):
-        encoded_city = quote(city)
+        encoded_city = quote(f"{city},FR")
         url = f"http://api.openweathermap.org/data/2.5/weather?q={encoded_city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
 
         async with aiohttp.ClientSession() as session:
