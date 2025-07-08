@@ -1,3 +1,6 @@
+# ✅ Nouveau fichier : cogs/user_city_weather.py
+# Utilise WeatherAPI.com
+
 import discord
 from discord.ext import commands, tasks
 import aiohttp
@@ -14,7 +17,7 @@ from config import (
     NEWS_CATEGORY
 )
 
-from utils.logger import logger  # Logger personnalisé
+from utils.logger import logger
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
@@ -22,7 +25,7 @@ class UserCityWeather(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        self.daily_weather_and_news.change_interval(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))  # 8h Paris
+        self.daily_weather_and_news.change_interval(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
 
@@ -61,6 +64,7 @@ class UserCityWeather(commands.Cog):
             confirm = await ctx.send("🗑️ Ta ville a bien été supprimée.")
         else:
             confirm = await ctx.send("❌ Tu n'avais pas encore enregistré de ville.")
+
         await confirm.delete(delay=5)
 
     @commands.command(name="meteo")
@@ -112,8 +116,8 @@ class UserCityWeather(commands.Cog):
                 logger.error(f"[UserCityWeather] Erreur pour {user_id} ({city}) : {e}")
 
     async def get_weather_text(self, city):
-        encoded_city = quote(f"{city},FR")
-        url = f"http://api.openweathermap.org/data/2.5/weather?q={encoded_city}&appid={WEATHER_API_KEY}&units=metric&lang=fr"
+        encoded_city = quote(city)
+        url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&lang=fr&q={encoded_city}"
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
@@ -123,15 +127,16 @@ class UserCityWeather(commands.Cog):
                     logger.warning(f"[Météo] Erreur JSON pour '{city}' : {e}")
                     return "Erreur de réponse de l'API météo.", None
 
-                logger.debug(f"[Météo] Réponse brute pour '{city}' : {data}")
+                logger.debug(f"[Météo] Réponse WeatherAPI pour '{city}' : {data}")
 
-                if resp.status != 200 or "main" not in data:
+                if resp.status != 200 or "current" not in data:
                     return "Ville introuvable ou erreur météo.", None
 
-                temp = data['main']['temp']
-                desc = data['weather'][0]['description'].capitalize()
-                icon = data['weather'][0]['icon']
-                return f"{desc}, {temp}°C", f"http://openweathermap.org/img/wn/{icon}@2x.png"
+                temp = data['current']['temp_c']
+                desc = data['current']['condition']['text']
+                icon_url = f"https:{data['current']['condition']['icon']}"
+
+                return f"{desc}, {temp} °C", icon_url
 
     async def build_news_embed(self):
         async with aiohttp.ClientSession() as session:
