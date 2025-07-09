@@ -22,8 +22,8 @@ class UserCityWeather(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        # 7h UTC = 9h heure de Paris
-        self.daily_weather_and_news.change_interval(time=dtime(hour=20, minute=30, tzinfo=pytz.utc))
+        # 8h UTC = 10h heure de Paris
+        self.daily_weather_and_news.change_interval(time=dtime(hour=8, minute=0, tzinfo=pytz.utc))
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
 
