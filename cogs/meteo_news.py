@@ -1,6 +1,3 @@
-# ✅ Nouveau fichier : cogs/user_city_weather.py
-# Utilise WeatherAPI.com
-
 import discord
 from discord.ext import commands, tasks
 import aiohttp
@@ -25,7 +22,8 @@ class UserCityWeather(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        self.daily_weather_and_news.change_interval(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))
+        # 7h UTC = 9h heure de Paris
+        self.daily_weather_and_news.change_interval(time=dtime(hour=7, minute=0, tzinfo=pytz.utc))
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
 
@@ -67,25 +65,6 @@ class UserCityWeather(commands.Cog):
 
         await confirm.delete(delay=5)
 
-    @commands.command(name="meteo")
-    async def force_meteo(self, ctx):
-        user_id = str(ctx.author.id)
-        cities = self.load_city_data()
-
-        if user_id not in cities:
-            await ctx.send("❌ Tu n'as pas encore enregistré de ville avec `!ville`.")
-            return
-
-        city = cities[user_id]
-        weather_text, icon_url = await self.get_weather_text(city)
-        embed = await self.build_news_embed()
-        embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
-
-        if icon_url:
-            embed.set_thumbnail(url=icon_url)
-
-        await ctx.send(embed=embed)
-
     def load_city_data(self):
         if not os.path.exists(DATA_FILE):
             return {}
@@ -97,7 +76,7 @@ class UserCityWeather(commands.Cog):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    @tasks.loop(time=dtime(hour=6, minute=0, tzinfo=pytz.utc))
+    @tasks.loop(time=dtime(hour=7, minute=0, tzinfo=pytz.utc))
     async def daily_weather_and_news(self):
         cities = self.load_city_data()
         embed = await self.build_news_embed()
@@ -142,8 +121,13 @@ class UserCityWeather(commands.Cog):
         async with aiohttp.ClientSession() as session:
             url = f"https://newsapi.org/v2/top-headlines?country={NEWS_COUNTRY}&category={NEWS_CATEGORY}&apiKey={NEWS_API_KEY}"
             async with session.get(url) as resp:
-                data = await resp.json()
-                headlines = data.get("articles", [])[:3]
+                try:
+                    data = await resp.json()
+                except Exception as e:
+                    logger.warning(f"[News] Erreur JSON : {e}")
+                    data = {}
+
+        headlines = data.get("articles", [])[:3]
 
         today = datetime.now(self.paris_tz).strftime("%d/%m/%Y")
         embed = discord.Embed(
