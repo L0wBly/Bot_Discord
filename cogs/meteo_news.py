@@ -23,7 +23,7 @@ class UserCityWeather(commands.Cog):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
         # 7h UTC = 9h heure de Paris
-        self.daily_weather_and_news.change_interval(time=dtime(hour=7, minute=0, tzinfo=pytz.utc))
+        self.daily_weather_and_news.change_interval(time=dtime(hour=20, minute=30, tzinfo=pytz.utc))
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
 
@@ -43,7 +43,7 @@ class UserCityWeather(commands.Cog):
         cities[user_id] = city
         self.save_city_data(cities)
 
-        confirm = await ctx.send(f"✅ Ta ville **{city}** a bien été enregistrée pour la météo quotidienne !")
+        confirm = await ctx.send(f"✅ Ta ville a bien été enregistrée pour la météo quotidienne !")
         await confirm.delete(delay=5)
         logger.info(f"[UserCityWeather] Ville enregistrée pour {ctx.author} : {city}")
 
