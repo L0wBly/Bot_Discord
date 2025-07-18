@@ -9,9 +9,7 @@ from urllib.parse import quote
 
 from config import (
     WEATHER_API_KEY,
-    NEWS_API_KEY,
-    NEWS_COUNTRY,
-    NEWS_CATEGORY
+    GNEWS_API_KEY,
 )
 
 from utils.logger import logger
@@ -22,7 +20,6 @@ class UserCityWeather(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        # 8h UTC = 10h heure de Paris
         self.daily_weather_and_news.change_interval(time=dtime(hour=8, minute=0, tzinfo=pytz.utc))
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
@@ -76,19 +73,17 @@ class UserCityWeather(commands.Cog):
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    @tasks.loop(time=dtime(hour=7, minute=0, tzinfo=pytz.utc))
+    @tasks.loop(time=dtime(hour=8, minute=0, tzinfo=pytz.utc))
     async def daily_weather_and_news(self):
         cities = self.load_city_data()
-        embed = await self.build_news_embed()
-
         for user_id, city in cities.items():
             try:
                 user = await self.bot.fetch_user(int(user_id))
                 weather_text, icon_url = await self.get_weather_text(city)
-                personalized_embed = embed.copy()
-                personalized_embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
+                embed = await self.build_news_embed(city)
+                embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
                 if icon_url:
-                    personalized_embed.set_thumbnail(url=icon_url)
+                    embed.set_thumbnail(url=icon_url)
                 await user.send(embed=personalized_embed)
                 logger.info(f"[UserCityWeather] Météo envoyée à {user} pour {city}")
             except Exception as e:
@@ -117,9 +112,10 @@ class UserCityWeather(commands.Cog):
 
                 return f"{desc}, {temp} °C", icon_url
 
-    async def build_news_embed(self):
+    async def build_news_embed(self, city):
         async with aiohttp.ClientSession() as session:
-            url = f"https://newsapi.org/v2/top-headlines?country={NEWS_COUNTRY}&category={NEWS_CATEGORY}&apiKey={NEWS_API_KEY}"
+            query = quote(city)
+            url = f"https://gnews.io/api/v4/search?q={query}&lang=fr&max=3&token={GNEWS_API_KEY}"
             async with session.get(url) as resp:
                 try:
                     data = await resp.json()
@@ -127,8 +123,7 @@ class UserCityWeather(commands.Cog):
                     logger.warning(f"[News] Erreur JSON : {e}")
                     data = {}
 
-        headlines = data.get("articles", [])[:3]
-
+        articles = data.get("articles", [])
         today = datetime.now(self.paris_tz).strftime("%d/%m/%Y")
         embed = discord.Embed(
             title=f"📰 Actus du jour - {today}",
@@ -136,8 +131,11 @@ class UserCityWeather(commands.Cog):
         )
 
         news_text = ""
-        for article in headlines:
-            news_text += f"**{article['title']}**\n{article['url']}\n\n"
+        for article in articles:
+            title = article.get("title")
+            url = article.get("url")
+            if title and url:
+                news_text += f"**{title}**\n{url}\n\n"
 
         embed.add_field(name="🗞️ Sélection des actualités", value=news_text or "Aucune actu trouvée.", inline=False)
         return embed
