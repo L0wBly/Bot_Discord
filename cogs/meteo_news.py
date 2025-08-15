@@ -85,6 +85,7 @@ class UserCityWeather(commands.Cog):
                 if icon_url:
                     embed.set_thumbnail(url=icon_url)
                 await user.send(embed=embed)
+
                 logger.info(f"[UserCityWeather] Météo envoyée à {user} pour {city}")
             except Exception as e:
                 logger.error(f"[UserCityWeather] Erreur pour {user_id} ({city}) : {e}")

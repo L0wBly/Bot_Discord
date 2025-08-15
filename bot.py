@@ -1,26 +1,26 @@
+# bot.py
+
 import os
+import sys
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import traceback  # ⬅️ nécessaire pour afficher les erreurs complètes
+import traceback
 
 from utils.logger import logger
+from config import DISCORD_TOKEN
 
-# Chargement du token et configuration
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
+# 🔒 Ne lancer que via systemd
+if os.getenv("INVOCATION_BY_SYSTEMD") != "1":
+    print("❌ Ce bot ne peut être lancé qu'en tant que service systemd.")
+    sys.exit(1)
 
-# Intents complets pour toutes les fonctionnalités du bot
+# Chargement des intents Discord
 intents = discord.Intents.all()
-
-# Commande prefix (ici "!")
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 bot.remove_command("help")
 
 async def load_cogs():
-    """
-    Charge dynamiquement chaque extension/cog du dossier cogs/
-    """
     cogs_folder = os.path.join(os.path.dirname(__file__), "cogs")
     for filename in os.listdir(cogs_folder):
         if not filename.endswith(".py") or filename.startswith("_"):
@@ -40,19 +40,21 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
-    contenu = message.content.strip()
-    if contenu.startswith("!help"):
+
+    contenu = message.content.strip().lower()
+    if contenu == "!help":
         ctx = await bot.get_context(message)
         cmd = bot.get_command("help")
         if cmd:
             await ctx.invoke(cmd)
             return
+
     await bot.process_commands(message)
 
 async def main():
     async with bot:
         await load_cogs()
-        await bot.start(TOKEN)
+        await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
     import asyncio

@@ -8,19 +8,28 @@ import pytz
 from config import BIRTHDAY_CHANNEL_ID
 from utils.logger import logger
 
+# Mois en français
 MOIS_FR = [
     "janvier", "février", "mars", "avril", "mai", "juin",
     "juillet", "août", "septembre", "octobre", "novembre", "décembre"
 ]
+
+# Décorateur pour restreindre l'exécution aux commandes dans le salon anniversaire
+def is_in_birthday_channel():
+    def predicate(ctx):
+        return ctx.channel.id == BIRTHDAY_CHANNEL_ID
+    return commands.check(predicate)
 
 class Birthdays(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.birthday_file = os.path.join("data", "birthdays.json")
         self.check_birthdays.start()
+        self.daily_clear_and_help.start()
 
     def cog_unload(self):
         self.check_birthdays.cancel()
+        self.daily_clear_and_help.cancel()
 
     def load_birthdays(self):
         os.makedirs("data", exist_ok=True)
@@ -45,7 +54,10 @@ class Birthdays(commands.Cog):
     def get_today_date_paris(self):
         paris_tz = pytz.timezone("Europe/Paris")
         now = datetime.now(paris_tz)
-        return now.strftime("%d-%m")  # JJ-MM
+        return now.strftime("%d-%m")
+
+    def get_paris_time_now(self):
+        return datetime.now(pytz.timezone("Europe/Paris"))
 
     @tasks.loop(time=time(hour=8, minute=0))  # 08:00 UTC = 10:00 Paris
     async def check_birthdays(self):
@@ -79,7 +91,44 @@ class Birthdays(commands.Cog):
                 except Exception as e:
                     logger.error(f"[Birthdays] Erreur lors du message à {user_id} : {e}")
 
-    @commands.command(name="anniv")
+    @tasks.loop(time=time(hour=16, minute=42))  # 15:30 UTC = 17:30 Paris
+    async def daily_clear_and_help(self):
+        channel = self.bot.get_channel(BIRTHDAY_CHANNEL_ID)
+        if channel is None:
+            logger.warning("[Birthdays] Salon d'anniversaire introuvable pour le clear.")
+            return
+
+        try:
+            await channel.purge(limit=10000, check=lambda m: not m.pinned)
+            logger.info("[Birthdays] Messages du salon anniversaire supprimés.")
+
+            embed = discord.Embed(
+                title="📌 Commandes disponibles dans ce salon",
+                color=discord.Color.teal(),
+                description=(
+                    "Voici les commandes que tu peux utiliser ici :\n\n"
+                    "🎂 **`!anniv JJ-MM`**\n"
+                    "→ Enregistre ou modifie ta date d'anniversaire\n\n"
+                    "📅 **`!anniv`**\n"
+                    "→ Affiche ta date enregistrée\n\n"
+                    "🗑️ **`!delanniv`**\n"
+                    "→ Supprime ton anniversaire\n\n"
+                    "🔮 **`!annivs`**\n"
+                    "→ Affiche les 20 prochains anniversaires"
+                )
+            )
+            embed.set_footer(text="Utilise l’une des commandes ci-dessus directement ici 🎉")
+
+
+
+            await channel.send(embed=embed)
+            logger.info("[Birthdays] Message de commandes envoyé après nettoyage.")
+
+        except Exception as e:
+            logger.error(f"[Birthdays] Erreur lors du clear ou de l'affichage des commandes : {e}")
+
+    @commands.command(name="anniv", help="Affiche notre date d'anniversaire ou l'enregistre.")
+    @is_in_birthday_channel()
     async def anniv(self, ctx, date: str = None):
         birthdays = self.load_birthdays()
         user_id = str(ctx.author.id)
@@ -123,7 +172,8 @@ class Birthdays(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name="delanniv")
+    @commands.command(name="delanniv" , help="Supprime ton anniversaire enregistré.")
+    @is_in_birthday_channel()
     async def delanniv(self, ctx):
         birthdays = self.load_birthdays()
         user_id = str(ctx.author.id)
@@ -145,12 +195,12 @@ class Birthdays(commands.Cog):
             )
             await ctx.send(embed=embed)
 
-    @commands.command(name="annivs")
+    @commands.command(name="annivs", help="Affiche les 20 anniversaires à venir.")
+    @is_in_birthday_channel()
     async def annivs(self, ctx):
         birthdays = self.load_birthdays()
 
-        # Corrigé : obtenir la date sans l'heure ni timezone
-        now_paris = datetime.now(pytz.timezone("Europe/Paris"))
+        now_paris = self.get_paris_time_now()
         today = datetime(now_paris.year, now_paris.month, now_paris.day)
 
         upcoming = []
