@@ -22,8 +22,11 @@ DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
 # --------- Paramètres d'envoi ----------
 # Envoi quotidien (heure locale Paris)
-SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))
-WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))
+SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))             # 8h par défaut
+WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))  # fenêtre de 10 min
+
+# Affichage des heures (conservé si besoin pour évoluer)
+HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "24"))      # non utilisé directement
 
 class UserCityWeather(commands.Cog):
     """
@@ -159,12 +162,36 @@ class UserCityWeather(commands.Cog):
 
     @commands.command(name="meteo")
     async def meteo_now(self, ctx, *, city: str = None):
-        """Envoie la météo en DM (heure par heure 00h→23h du jour) et supprime la commande du salon."""
-        try:
-            await ctx.message.delete()
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+        """Envoie la météo en DM (00h→23h du jour) et supprime la commande du salon si possible."""
+        # --- suppression immédiate de la commande si le bot peut ---
+        if ctx.guild:
+            try:
+                me = ctx.guild.me or discord.utils.get(ctx.guild.members, id=self.bot.user.id)
+                perms = ctx.channel.permissions_for(me) if me else None
+                if perms and perms.manage_messages:
+                    try:
+                        await ctx.message.delete()
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+                else:
+                    try:
+                        warn = await ctx.reply(
+                            "ℹ️ Je n'ai pas la permission **Gérer les messages** ici, je ne peux pas supprimer ta commande.",
+                            mention_author=False,
+                        )
+                        await warn.delete(delay=5)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        else:
+            # si MP avec le bot
+            try:
+                await ctx.message.delete()
+            except Exception:
+                pass
 
+        # --- ville cible ---
         if city is None:
             city = self.load_city_data().get(str(ctx.author.id))
         if not city:
@@ -175,6 +202,7 @@ class UserCityWeather(commands.Cog):
                 await m.delete(delay=8)
             return
 
+        # --- envoi DM ---
         try:
             weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
             weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
