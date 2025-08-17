@@ -40,10 +40,14 @@ class BumpReminder(commands.Cog):
         self.last_bump = load_last_bump()
         self.last_reminder_msg_id = None
         self.remind_task.start()
+        # ⬇️ NOUVEAU : tâche de purge des messages membres toutes les 5 min
+        self.member_purge_task.start()
         logger.info("La tâche de rappel bump_reminder a démarré.")
 
     def cog_unload(self):
         self.remind_task.cancel()
+        # ⬇️ NOUVEAU : on arrête aussi la purge
+        self.member_purge_task.cancel()
         logger.info("Arrêt du module bump_reminder.")
 
     @tasks.loop(seconds=60)
@@ -174,6 +178,61 @@ class BumpReminder(commands.Cog):
                     await self.purge_old_disboard(message.channel, except_id=message.id)
                 except Exception as e:
                     logger.warning(f"Erreur purge disboard dans on_message : {e}")
+
+    # ⬇️⬇️⬇️ NOUVEAU : Purge des 100 derniers messages de MEMBRES toutes les 5 minutes
+    @tasks.loop(minutes=5)
+    async def member_purge_task(self):
+        await self.bot.wait_until_ready()
+        channel = self.bot.get_channel(BUMP_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
+            logger.warning("[BumpReminder] Salon introuvable pour la purge membres.")
+            return
+
+        to_delete = []
+        try:
+            # On scanne un peu large pour récolter jusqu'à 100 messages de membres
+            async for m in channel.history(limit=500):
+                if m.pinned:
+                    continue
+                if m.author.bot:  # protège Disboard + tous les bots (dont ce cog)
+                    continue
+
+                # Bulk delete impossible au-delà de 14 jours -> on filtre
+                age_seconds = (datetime.now(timezone.utc) - m.created_at.replace(tzinfo=timezone.utc)).total_seconds()
+                if age_seconds >= 14 * 24 * 3600:
+                    continue
+
+                to_delete.append(m)
+                if len(to_delete) == 100:
+                    break
+
+            if not to_delete:
+                return
+
+            # Tentative en suppression groupée
+            try:
+                await channel.delete_messages(to_delete)
+                logger.info(f"[BumpReminder] {len(to_delete)} messages de membres supprimés (bulk) dans #{channel.name}.")
+            except Exception as e:
+                # Fallback : suppression individuelle si l'API refuse la bulk pour une raison quelconque
+                logger.warning(f"[BumpReminder] Bulk delete a échoué ({e}), fallback en suppression individuelle.")
+                deleted = 0
+                for msg in to_delete:
+                    try:
+                        await msg.delete()
+                        deleted += 1
+                    except Exception:
+                        pass
+                if deleted:
+                    logger.info(f"[BumpReminder] {deleted} messages de membres supprimés (fallback) dans #{channel.name}.")
+        except discord.Forbidden:
+            logger.error("[BumpReminder] Permissions insuffisantes pour supprimer des messages (Manage Messages).")
+        except Exception as e:
+            logger.error(f"[BumpReminder] Erreur pendant la purge des messages membres : {e}")
+
+    @member_purge_task.before_loop
+    async def before_member_purge(self):
+        await self.bot.wait_until_ready()
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(BumpReminder(bot))
