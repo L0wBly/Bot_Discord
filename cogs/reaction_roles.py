@@ -16,7 +16,7 @@ from config import (
     ROLE_POETE_ID,
     ROLE_ECRIVAIN_ID,
     ROLE_BUMP_ID,
-    ROLE_NOTIF_NEWS
+    ROLE_NOTIF_NEWS,
 )
 
 EMOJI_ROLE_MAP = {
