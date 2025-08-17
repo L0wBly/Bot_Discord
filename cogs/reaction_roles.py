@@ -173,7 +173,7 @@ class RoleStats(commands.Cog):
 
     @commands.command()
     @commands.has_permissions(administrator=True)
-    async def setup_roles(self, ctx):
+    async def setup_roles(self, ctx): #Commande staff !setup_roles
         """Crée/Met à jour le panneau d'auto-rôles (à lancer une fois)."""
         if ctx.channel.id != int(REACTION_ROLE_CHANNEL_ID):
             m = await ctx.send("❌ Utilise cette commande dans le salon d'auto-rôle configuré.")
