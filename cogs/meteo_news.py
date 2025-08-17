@@ -10,6 +10,9 @@ from typing import Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
 import pytz
 from urllib.parse import quote
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+from html import unescape
 
 from config import (
     WEATHER_API_KEY,
@@ -20,19 +23,24 @@ from utils.logger import logger
 # --------- Fichier de persistance ----------
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
-# --------- Paramètres d'envoi ----------
-# Envoi quotidien (heure locale Paris)
-SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))             # 8h par défaut
+# --------- Paramètres ----------
+# Envoi quotidien (heure locale Paris) -> à 10h comme demandé
+SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "10"))
 WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))  # fenêtre de 10 min
+NEWS_DEFAULT_PERIOD = os.getenv("NEWS_DEFAULT_PERIOD", "jour").lower()  # 'jour' ou 'semaine'
+MAX_NEWS = int(os.getenv("MAX_NEWS", "6"))  # nb d'articles à afficher
 
-# Affichage des heures (conservé si besoin pour évoluer)
-HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "24"))      # non utilisé directement
+HOURLY_COUNT = 24  # on affiche 00→23
 
 class UserCityWeather(commands.Cog):
     """
-    - !ville [nom]   : sans argument → DM la ville enregistrée ; avec argument → enregistre la ville
-    - !delville      : supprime la ville enregistrée
-    - !meteo [ville] : **DM** météo + heure-par-heure (00h→23h du jour), la commande est supprimée du salon
+    Commandes:
+      - !ville [nom]     : sans argument → DM la ville enregistrée ; avec argument → enregistre
+      - !delville        : supprime la ville enregistrée
+      - !meteo [ville]   : DM météo du jour (00→23) + actus (période par défaut)
+      - !actus [ville] [jour|semaine] : DM actus pour la ville (ou la ville enregistrée)
+
+    Tous les matins à 10h (heure de Paris), le bot envoie **météo + actus** en un seul DM.
     """
 
     def __init__(self, bot):
@@ -40,7 +48,7 @@ class UserCityWeather(commands.Cog):
         self.paris_tz = pytz.timezone("Europe/Paris")
         self.last_daily_date = None
         self.daily_weather_and_news.start()
-        logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
+        logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée (10h Paris)")
 
     # ---------- Helpers normalisation villes ----------
     def _strip_accents(self, s: str) -> str:
@@ -124,7 +132,7 @@ class UserCityWeather(commands.Cog):
         """
         !ville <nom> → enregistre la ville.
         !ville       → DM la ville enregistrée.
-        Le message de commande est supprimé si possible.
+        (Le message de commande est supprimé si possible.)
         """
         # suppression message si possible
         if ctx.guild:
@@ -156,7 +164,6 @@ class UserCityWeather(commands.Cog):
         user_id = str(ctx.author.id)
         cities = self.load_city_data()
 
-        # Afficher la ville enregistrée si aucun argument
         if city is None:
             saved = cities.get(user_id)
             if saved:
@@ -173,11 +180,9 @@ class UserCityWeather(commands.Cog):
                     await m.delete(delay=6)
             return
 
-        # Sinon: enregistrer la nouvelle ville
         cities[user_id] = city.strip()
         self.save_city_data(cities)
 
-        # petit retour (dans le salon, auto-supprimé)
         try:
             msg = await ctx.send("✅ Ta ville a bien été enregistrée pour la météo quotidienne !")
             await msg.delete(delay=5)
@@ -209,7 +214,7 @@ class UserCityWeather(commands.Cog):
 
     @commands.command(name="meteo")
     async def meteo_now(self, ctx, *, city: str = None):
-        """Envoie la météo en DM (00h→23h du jour) et supprime la commande du salon si possible."""
+        """DM météo (00h→23h du jour) + actus (période par défaut) et supprime la commande si possible."""
         # suppression immédiate si possible
         if ctx.guild:
             try:
@@ -252,7 +257,7 @@ class UserCityWeather(commands.Cog):
         try:
             weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
             weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
-            news_embed = await self.build_news_embed(city)
+            news_embed = await self.build_news_embed(city, period=NEWS_DEFAULT_PERIOD)
             await ctx.author.send(embeds=[weather_embed, news_embed])
         except discord.Forbidden:
             m = await ctx.reply("❌ Impossible d'envoyer un DM. Ouvre tes messages privés pour recevoir la météo.", mention_author=False)
@@ -265,7 +270,66 @@ class UserCityWeather(commands.Cog):
                 m = await ctx.reply("❌ Erreur lors de la récupération des données météo.", mention_author=False)
                 await m.delete(delay=8)
 
-    # ---------- Tâche quotidienne ----------
+    @commands.command(name="actus")
+    async def actus_cmd(self, ctx, *, args: str = None):
+        """
+        !actus
+        !actus semaine
+        !actus <ville>
+        !actus <ville> semaine
+        → envoie les actus en DM, supprime la commande si possible.
+        """
+        # supprimer la commande si possible
+        if ctx.guild:
+            try:
+                me = ctx.guild.me or discord.utils.get(ctx.guild.members, id=self.bot.user.id)
+                perms = ctx.channel.permissions_for(me) if me else None
+                if perms and perms.manage_messages:
+                    try:
+                        await ctx.message.delete()
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+                else:
+                    try:
+                        warn = await ctx.reply(
+                            "ℹ️ Je n'ai pas la permission **Gérer les messages** ici, je ne peux pas supprimer ta commande.",
+                            mention_author=False,
+                        )
+                        await warn.delete(delay=5)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # parse args
+        period = "jour"
+        city = None
+        if args:
+            parts = args.split()
+            if parts[-1].lower() in ("semaine", "jour"):
+                period = parts[-1].lower()
+                city = " ".join(parts[:-1]).strip() or None
+            else:
+                city = args.strip() or None
+
+        if city is None:
+            city = self.load_city_data().get(str(ctx.author.id))
+
+        try:
+            embed = await self.build_news_embed(city, period=period)
+            await ctx.author.send(embed=embed)
+        except discord.Forbidden:
+            m = await ctx.reply("❌ Impossible d'envoyer un DM. Ouvre tes messages privés.", mention_author=False)
+            await m.delete(delay=8)
+        except Exception as e:
+            logger.error(f"[UserCityWeather] Erreur !actus: {e}")
+            try:
+                await ctx.author.send("❌ Erreur lors de la récupération des actualités.")
+            except discord.Forbidden:
+                m = await ctx.reply("❌ Erreur lors de la récupération des actualités.", mention_author=False)
+                await m.delete(delay=8)
+
+    # ---------- Tâche quotidienne : 10h Paris -> météo + actus ----------
     @tasks.loop(minutes=5)
     async def daily_weather_and_news(self):
         now_paris = datetime.now(timezone.utc).astimezone(self.paris_tz)
@@ -282,9 +346,9 @@ class UserCityWeather(commands.Cog):
                     continue
                 weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
                 weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
-                news_embed = await self.build_news_embed(city)
-                await user.send(embeds=[weather_embed, news_embed])
-                logger.info(f"[UserCityWeather] Météo envoyée à {user} ({city})")
+                news_embed = await self.build_news_embed(city, period=NEWS_DEFAULT_PERIOD)
+                await user.send(embeds=[weather_embed, news_embed])  # météo + actus ENSEMBLE
+                logger.info(f"[UserCityWeather] Météo/actus envoyées à {user} ({city})")
             except discord.Forbidden:
                 logger.warning(f"[UserCityWeather] DM refusé par {user_id}")
             except Exception as e:
@@ -308,10 +372,6 @@ class UserCityWeather(commands.Cog):
         return "🌦️"
 
     async def get_weather_with_hourly(self, city: str):
-        """
-        Retourne (weather_text, icon_url, hourly_blocks)
-        -> Affiche **toutes les heures du jour local (00h→23h)**, quelle que soit l'heure actuelle.
-        """
         resolved = await self._resolve_city_weatherapi(city)
         if not resolved:
             return "Ville introuvable ou erreur météo.", None, []
@@ -340,7 +400,6 @@ class UserCityWeather(commands.Cog):
         current = data["current"]
         location = data["location"]
 
-        # Conditions actuelles
         temp = round(current.get("temp_c") or 0)
         cond = current.get("condition") or {}
         desc = cond.get("text") or "—"
@@ -349,7 +408,6 @@ class UserCityWeather(commands.Cog):
         emoji = self._emoji_from_weatherapi_code(code)
         weather_text = f"{emoji} {desc}, {temp} °C"
 
-        # Heure locale du lieu → on prend **la date locale** pour choisir le bon forecastday
         tz_id = location.get("tz_id") or "Europe/Paris"
         try:
             tz = pytz.timezone(tz_id)
@@ -357,7 +415,6 @@ class UserCityWeather(commands.Cog):
             tz = self.paris_tz
         local_date = datetime.now(timezone.utc).astimezone(tz).date()
 
-        # Choisir le forecastday qui correspond à la date locale
         days = data.get("forecast", {}).get("forecastday", []) or []
         hours_today = []
         for d in days:
@@ -371,17 +428,14 @@ class UserCityWeather(commands.Cog):
         if not hours_today and days:
             hours_today = days[0].get("hour", []) or []
 
-        # Construire les 24 lignes (00h→23h)
         hourly_lines: List[str] = []
         for h in hours_today:
-            t_str = h.get("time") or ""  # "YYYY-MM-DD HH:MM" (local)
+            t_str = h.get("time") or ""
             hour_txt = t_str[-5:-3] + "h" if len(t_str) >= 16 else "—"
-
             h_cond = h.get("condition") or {}
             h_code = int(h_cond.get("code") or 1000)
             h_emoji = self._emoji_from_weatherapi_code(h_code)
             h_temp = round(h.get("temp_c") or 0)
-
             try:
                 pop = int(h.get("chance_of_rain"))
             except Exception:
@@ -391,15 +445,12 @@ class UserCityWeather(commands.Cog):
             except Exception:
                 rain_mm = 0.0
             rain_txt = f"{rain_mm:.1f}mm" if rain_mm > 0 else "—"
-
             hourly_lines.append(f"**{hour_txt}**  {h_emoji}  {h_temp}°C  *(POP {pop}%, pluie {rain_txt})*")
 
-        # Split en blocs (<=1024 chars/field)
         blocks, chunk = [], ""
         for line in hourly_lines:
             if len(chunk) + len(line) + 1 > 1000:
-                blocks.append(chunk)
-                chunk = line
+                blocks.append(chunk); chunk = line
             else:
                 chunk += ("\n" if chunk else "") + line
         if chunk:
@@ -419,54 +470,112 @@ class UserCityWeather(commands.Cog):
         embed.set_footer(text="Source: WeatherAPI")
         return embed
 
-    # ---------- Actus (GNews) ----------
-    async def build_news_embed(self, city: str) -> discord.Embed:
-        today = datetime.now(self.paris_tz).strftime("%d/%m/%Y")
-        embed = discord.Embed(title=f"📰 Actus du jour — {today}", color=discord.Color.orange())
+    # ---------- Actus (GNews + fallback Google News RSS) ----------
+    async def build_news_embed(self, city: Optional[str], period: str = "jour") -> discord.Embed:
+        """
+        period: 'jour' (24h) ou 'semaine' (7 jours).
+        1) Tente GNews (clé si dispo)
+        2) Fallback Google News RSS (pas de clé)
+        """
+        period = (period or "jour").lower()
+        delta = timedelta(days=7 if period == "semaine" else 1)
+        since_dt = datetime.now(self.paris_tz) - delta
 
-        articles = []
-        source_label = f"🗞️ Actus près de {city}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                for q_raw in self._city_query_variants(city):
-                    q = quote(f"\"{q_raw}\"")
-                    url_city = f"https://gnews.io/api/v4/search?q={q}&lang=fr&max=4&token={GNEWS_API_KEY}"
-                    async with session.get(url_city, timeout=12) as r1:
-                        d1 = await r1.json(content_type=None)
-                        if r1.status == 200:
-                            articles = d1.get("articles", []) or []
-                            if articles:
-                                break
-                if not articles:
-                    source_label = "🇫🇷 À la une en France"
-                    url_fr = f"https://gnews.io/api/v4/top-headlines?country=fr&lang=fr&max=4&token={GNEWS_API_KEY}"
-                    async with session.get(url_fr, timeout=12) as r2:
-                        d2 = await r2.json(content_type=None)
-                        if r2.status == 200:
-                            articles = d2.get("articles", []) or []
-        except Exception as e:
-            logger.warning(f"[News] Erreur récupération actus: {e}")
+        title_date = datetime.now(self.paris_tz).strftime("%d/%m/%Y")
+        period_label = "de la semaine" if period == "semaine" else "du jour"
+        embed = discord.Embed(title=f"📰 Actus {period_label} — {title_date}", color=discord.Color.orange())
+
+        articles: List[Tuple[str, str, datetime]] = []
+
+        # ---- 1) GNews (si clé dispo) ----
+        if GNEWS_API_KEY:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    if city:
+                        for q_raw in self._city_query_variants(city):
+                            q = quote(q_raw)
+                            url = f"https://gnews.io/api/v4/search?q={q}&lang=fr&max={MAX_NEWS}&token={GNEWS_API_KEY}"
+                            async with session.get(url, timeout=12) as r:
+                                d = await r.json(content_type=None)
+                                if r.status == 200 and d.get("articles"):
+                                    for a in d["articles"]:
+                                        t = (a.get("title") or "").strip()
+                                        u = a.get("url")
+                                        pd = a.get("publishedAt")
+                                        try:
+                                            pub = datetime.fromisoformat(pd.replace("Z", "+00:00")).astimezone(self.paris_tz)
+                                        except Exception:
+                                            pub = datetime.now(self.paris_tz)
+                                        if pub >= since_dt and t and u:
+                                            articles.append((t, u, pub))
+                                    if articles:
+                                        break
+                    if not articles:
+                        url = f"https://gnews.io/api/v4/top-headlines?country=fr&lang=fr&max={MAX_NEWS}&token={GNEWS_API_KEY}"
+                        async with aiohttp.ClientSession() as session2:
+                            async with session2.get(url, timeout=12) as r2:
+                                d2 = await r2.json(content_type=None)
+                                if r2.status == 200 and d2.get("articles"):
+                                    for a in d2["articles"]:
+                                        t = (a.get("title") or "").strip()
+                                        u = a.get("url")
+                                        pd = a.get("publishedAt")
+                                        try:
+                                            pub = datetime.fromisoformat(pd.replace("Z", "+00:00")).astimezone(self.paris_tz)
+                                        except Exception:
+                                            pub = datetime.now(self.paris_tz)
+                                        if pub >= since_dt and t and u:
+                                            articles.append((t, u, pub))
+            except Exception as e:
+                logger.debug(f"[News] GNews erreur: {e}")
+
+        # ---- 2) Fallback Google News RSS ----
+        if not articles:
+            try:
+                if city:
+                    q = quote(city)
+                    rss_url = f"https://news.google.com/rss/search?q={q}&hl=fr&gl=FR&ceid=FR:fr"
+                else:
+                    rss_url = "https://news.google.com/rss?hl=fr&gl=FR&ceid=FR:fr"
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(rss_url, timeout=12) as r:
+                        xml = await r.text()
+                root = ET.fromstring(xml)
+                for item in root.findall(".//item"):
+                    title = unescape((item.findtext("title") or "").strip())
+                    link = item.findtext("link") or ""
+                    pub_raw = item.findtext("pubDate")
+                    try:
+                        pub = parsedate_to_datetime(pub_raw).astimezone(self.paris_tz)
+                    except Exception:
+                        pub = datetime.now(self.paris_tz)
+                    if pub >= since_dt and title and link:
+                        articles.append((title, link, pub))
+                articles.sort(key=lambda x: x[2], reverse=True)
+                articles = articles[:MAX_NEWS]
+            except Exception as e:
+                logger.debug(f"[News] RSS erreur: {e}")
 
         if not articles:
             news_text = "Aucune actu trouvée."
         else:
-            lines = []
-            for a in articles:
-                title = (a.get("title") or "Sans titre").strip()
-                url = a.get("url")
-                lines.append(f"• **{title}**\n{url}" if url else f"• **{title}**")
+            lines = [f"• **{t}**\n{u}" for (t, u, _) in articles]
             news_text, cur = "", ""
             for line in lines:
                 if len(cur) + len(line) + 1 > 1000:
-                    news_text += (("\n" if news_text else "") + cur)
-                    cur = line
+                    news_text += (("\n" if news_text else "") + cur); cur = line
                 else:
                     cur += (("\n" if cur else "") + line)
             if cur:
                 news_text += (("\n" if news_text else "") + cur)
 
-        embed.add_field(name=source_label, value=news_text, inline=False)
-        embed.set_footer(text="Source: GNews")
+        embed.add_field(
+            name=(f"🗞️ Actus près de {city}" if city else "🇫🇷 À la une en France"),
+            value=news_text,
+            inline=False
+        )
+        embed.set_footer(text="Source: GNews / Google News")
         return embed
 
     # ---------- Lifecycle ----------
