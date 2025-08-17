@@ -26,8 +26,9 @@ SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))             # 8h par défaut
 WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))  # fenêtre de 10 min
 
 # Affichage des heures
-NEXT_DAY_EXTRA_HOURS = int(os.getenv("METEO_NEXTDAY_HOURS", "4"))        # 00..03 demain
-NEXTDAY_AFTER_HOUR   = int(os.getenv("METEO_NEXTDAY_AFTER_HOUR", "13"))  # n’ajoute demain qu’après 13h locale
+HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "12"))             # dispo si tu veux limiter
+NEXT_DAY_EXTRA_HOURS = int(os.getenv("METEO_NEXTDAY_HOURS", "4"))     # 00..03 demain
+NEXTDAY_AFTER_HOUR   = int(os.getenv("METEO_NEXTDAY_AFTER_HOUR", "13"))  # ajoute demain seulement après 13h locale
 
 
 class UserCityWeather(commands.Cog):
@@ -288,7 +289,7 @@ class UserCityWeather(commands.Cog):
         - Résout la ville via search.json (accents/tirets/ponctuation gérés)
         - Récupère forecast.json avec days=2 (aujourd'hui + demain)
         - Heures affichées :
-            * t = maintenant(local) arrondi à l'heure → 23h aujourd'hui
+            * t = maintenant(local, depuis l'horloge du bot en UTC convertie) arrondi à l'heure → 23h aujourd'hui
             * + 00h..NEXT_DAY_EXTRA_HOURS-1 demain UNIQUEMENT si now >= NEXTDAY_AFTER_HOUR
         """
         resolved = await self._resolve_city_weatherapi(city)
@@ -338,20 +339,15 @@ class UserCityWeather(commands.Cog):
         hours_today = days[0].get("hour", []) if len(days) > 0 else []
         hours_tomorrow = days[1].get("hour", []) if len(days) > 1 else []
 
-        # Fuseau & "maintenant" FIABLE via l’API (location.localtime)
+        # Fuseau de la ville
         tz_id = location.get("tz_id") or "Europe/Paris"
         try:
             tz = pytz.timezone(tz_id)
         except Exception:
             tz = pytz.timezone("Europe/Paris")
 
-        try:
-            # ex: "2025-08-17 18:12" (heure locale du lieu fournie par WeatherAPI)
-            lt_str = location.get("localtime")
-            naive_now = datetime.strptime(lt_str, "%Y-%m-%d %H:%M")
-            now_local = tz.localize(naive_now)
-        except Exception:
-            now_local = datetime.now(tz)
+        # Horaire FIABLE = horloge du bot (UTC) convertie dans le fuseau de la ville
+        now_local = datetime.now(timezone.utc).astimezone(tz)
 
         # Arrondi à l’heure pour inclure la tranche courante
         floor_now = now_local.replace(minute=0, second=0, microsecond=0)
