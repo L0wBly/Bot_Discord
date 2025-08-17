@@ -12,102 +12,152 @@ from config import (
     WEATHER_API_KEY,
     GNEWS_API_KEY,
 )
-
 from utils.logger import logger
 
+# --------- Fichiers & config ----------
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
-# Config heure d'envoi (heure locale Paris)
-SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))            # 8h par défaut
-WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10")) # fenêtre 10 min par défaut
-HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "12"))     # 12 prochaines heures
+# Envoi quotidien (heure locale Paris)
+SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))             # 8h par défaut
+WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))  # fenêtre de 10 min
+HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "12"))      # nb d'heures à afficher
+
 
 class UserCityWeather(commands.Cog):
+    """
+    - !ville <ville>     : enregistre la ville de l'utilisateur
+    - !delville          : supprime la ville enregistrée
+    - !meteo [ville]     : envoie la météo + horaire en DM et supprime la commande du salon
+
+    Envoi quotidien en DM à l'heure SEND_HOUR (Paris) avec une fenêtre de WINDOW_MINUTES.
+    """
+
     def __init__(self, bot):
         self.bot = bot
         self.paris_tz = pytz.timezone("Europe/Paris")
-        self.last_daily_date = None  # évite le double envoi journalier
+        self.last_daily_date = None  # évite les doublons d'envoi quotidien
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
 
-    def cog_unload(self):
-        self.daily_weather_and_news.cancel()
-        logger.info("[UserCityWeather] Tâche arrêtée")
-
-    # -------------------- stockage villes --------------------
+    # ------------- Persistance villes -------------
     def load_city_data(self):
         if not os.path.exists(DATA_FILE):
             return {}
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f) or {}
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            logger.warning("[UserCityWeather] user_cities.json corrompu, réinitialisation.")
+            try:
+                with open(DATA_FILE, "w", encoding="utf-8") as f:
+                    json.dump({}, f)
+            except Exception:
+                pass
+            return {}
 
     def save_city_data(self, data):
         os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # -------------------- commandes --------------------
+    # ------------------- Commandes -------------------
     @commands.command(name="ville")
     async def set_city(self, ctx, *, city: str):
+        """Enregistre ta ville pour l'envoi quotidien."""
         user_id = str(ctx.author.id)
         try:
             await ctx.message.delete()
-        except discord.Forbidden:
+        except (discord.Forbidden, discord.HTTPException):
             pass
 
         cities = self.load_city_data()
-        cities[user_id] = city
+        cities[user_id] = city.strip()
         self.save_city_data(cities)
 
-        confirm = await ctx.send(f"✅ Ta ville a bien été enregistrée pour la météo quotidienne !")
-        await confirm.delete(delay=5)
+        try:
+            confirm = await ctx.send("✅ Ta ville a bien été enregistrée pour la météo quotidienne !")
+            await confirm.delete(delay=5)
+        except Exception:
+            pass
+
         logger.info(f"[UserCityWeather] Ville enregistrée pour {ctx.author} : {city}")
 
     @commands.command(name="delville")
     async def delete_city(self, ctx):
+        """Supprime ta ville enregistrée."""
         user_id = str(ctx.author.id)
         try:
             await ctx.message.delete()
-        except discord.Forbidden:
+        except (discord.Forbidden, discord.HTTPException):
             pass
 
         cities = self.load_city_data()
         if user_id in cities:
             del cities[user_id]
             self.save_city_data(cities)
-            confirm = await ctx.send("🗑️ Ta ville a bien été supprimée.")
+            txt = "🗑️ Ta ville a bien été supprimée."
         else:
-            confirm = await ctx.send("❌ Tu n'avais pas encore enregistré de ville.")
+            txt = "❌ Tu n'avais pas encore enregistré de ville."
 
-        await confirm.delete(delay=5)
+        try:
+            confirm = await ctx.send(txt)
+            await confirm.delete(delay=5)
+        except Exception:
+            pass
 
     @commands.command(name="meteo")
     async def meteo_now(self, ctx, *, city: str = None):
-        """!meteo [ville] — envoie la météo + heure par heure immédiatement."""
+        """Envoie la météo en DM et supprime la commande du salon."""
+        # 1) Supprime immédiatement la commande dans le salon
+        try:
+            await ctx.message.delete()
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+        # 2) Détermine la ville
         if city is None:
             city = self.load_city_data().get(str(ctx.author.id))
         if not city:
-            await ctx.reply("❌ Aucune ville enregistrée. Utilise `!ville <ta_ville>` ou `!meteo <ville>`.", mention_author=False)
+            # DM si possible, sinon message bref dans le salon
+            try:
+                await ctx.author.send("❌ Aucune ville enregistrée. Utilise `!ville <ta_ville>` ou `!meteo <ville>`.")
+            except discord.Forbidden:
+                msg = await ctx.reply("❌ Aucune ville enregistrée. Utilise `!ville <ta_ville>` ou `!meteo <ville>`.", mention_author=False)
+                await msg.delete(delay=8)
             return
 
+        # 3) Récupère météo + heure par heure, construit et envoie en DM
         try:
             weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
             embed = await self.build_news_embed(city)
             embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
-            # Ajoute 1 à 2 champs "Heure par heure" (Discord limite 1024 chars / field)
             for idx, block in enumerate(hourly_blocks, start=1):
                 embed.add_field(name="🕒 Heure par heure" if idx == 1 else "🕒 (suite)", value=block, inline=False)
             if icon_url:
                 embed.set_thumbnail(url=icon_url)
-            await ctx.send(embed=embed)
+
+            await ctx.author.send(embed=embed)
+
+        except discord.Forbidden:
+            # DM fermés → message bref dans le salon
+            msg = await ctx.reply("❌ Impossible d'envoyer un DM. Ouvre tes messages privés pour recevoir la météo.", mention_author=False)
+            await msg.delete(delay=8)
+
         except Exception as e:
             logger.error(f"[UserCityWeather] Erreur !meteo pour {city}: {e}")
-            await ctx.reply("❌ Erreur lors de la récupération des données météo.", mention_author=False)
+            try:
+                await ctx.author.send("❌ Erreur lors de la récupération des données météo.")
+            except discord.Forbidden:
+                msg = await ctx.reply("❌ Erreur lors de la récupération des données météo.", mention_author=False)
+                await msg.delete(delay=8)
 
-    # -------------------- scheduler quotidien --------------------
+    # ------------------ Tâche quotidienne ------------------
     @tasks.loop(minutes=5)
     async def daily_weather_and_news(self):
-        """Check toutes les 5 min; envoie entre SEND_HOUR:00 et +WINDOW_MINUTES (heure Paris)."""
+        """
+        Check toutes les 5 min : si on est dans la fenêtre SEND_HOUR:[00..WINDOW_MINUTES-1] (heure Paris)
+        et qu'on n'a pas encore envoyé aujourd'hui → envoi en DM à tous les utilisateurs enregistrés.
+        """
         now_paris = datetime.now(timezone.utc).astimezone(self.paris_tz)
         if self.last_daily_date == now_paris.date():
             return
@@ -115,9 +165,11 @@ class UserCityWeather(commands.Cog):
             return
 
         cities = self.load_city_data()
-        for user_id, city in cities.items():
+        for user_id, city in list(cities.items()):
             try:
                 user = await self.bot.fetch_user(int(user_id))
+                if not user:
+                    continue
                 weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
                 embed = await self.build_news_embed(city)
                 embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
@@ -125,10 +177,13 @@ class UserCityWeather(commands.Cog):
                     embed.add_field(name="🕒 Heure par heure" if idx == 1 else "🕒 (suite)", value=block, inline=False)
                 if icon_url:
                     embed.set_thumbnail(url=icon_url)
+
                 await user.send(embed=embed)
-                logger.info(f"[UserCityWeather] Météo envoyée à {user} pour {city}")
+                logger.info(f"[UserCityWeather] Météo envoyée à {user} ({city})")
+            except discord.Forbidden:
+                logger.warning(f"[UserCityWeather] DM refusé par {user_id}")
             except Exception as e:
-                logger.error(f"[UserCityWeather] Erreur pour {user_id} ({city}) : {e}")
+                logger.warning(f"[UserCityWeather] Envoi échoué pour {user_id} ({city}) : {e}")
 
         self.last_daily_date = now_paris.date()
 
@@ -136,25 +191,21 @@ class UserCityWeather(commands.Cog):
     async def _before_daily(self):
         await self.bot.wait_until_ready()
 
-    # -------------------- météo + heure par heure --------------------
+    # ------------------ Météo & horaire (WeatherAPI) ------------------
     def _emoji_from_weatherapi_code(self, code: int) -> str:
-        # mapping simple des codes WeatherAPI → emoji
         if code == 1000: return "☀️"                # Clear/Sunny
         if code == 1003: return "⛅"                 # Partly cloudy
         if code in (1006, 1009): return "☁️"        # Cloudy/Overcast
         if code in (1030, 1135, 1147): return "🌫️"  # Mist/Fog
-        # pluie / bruine
-        if 1150 <= code <= 1207 or 1240 <= code <= 1246: return "🌧️"
-        # neige / grésil
-        if 1210 <= code <= 1237 or 1255 <= code <= 1264: return "❄️"
-        # orage
-        if 1273 <= code <= 1282: return "⛈️"
+        if 1150 <= code <= 1207 or 1240 <= code <= 1246: return "🌧️"  # pluie/bruine
+        if 1210 <= code <= 1237 or 1255 <= code <= 1264: return "❄️"   # neige/grésil
+        if 1273 <= code <= 1282: return "⛈️"                            # orage
         return "🌦️"
 
-    async def get_weather_with_hourly(self, city):
+    async def get_weather_with_hourly(self, city: str):
         """
         Retourne (weather_text:str, icon_url:str|None, hourly_blocks:list[str])
-        hourly_blocks = 1..2 blocs texte formatés pour Discord (<=1024 chars)
+        hourly_blocks : 1..n chaînes <= ~1000 caractères chacune (Discord: 1024 max par field).
         """
         encoded_city = quote(city)
         url = (
@@ -165,12 +216,17 @@ class UserCityWeather(commands.Cog):
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                data = await resp.json(content_type=None)
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception as e:
+                    logger.warning(f"[Météo] Erreur JSON pour '{city}' : {e}")
+                    return "Erreur de réponse de l'API météo.", None, []
+
                 if resp.status != 200:
                     logger.warning(f"[Météo] {city} — HTTP {resp.status} — {data}")
                     return "Ville introuvable ou erreur météo.", None, []
 
-        # ----- courant -----
+        # ---- courant ----
         if "current" not in data or "location" not in data:
             return "Ville introuvable ou erreur météo.", None, []
 
@@ -180,41 +236,41 @@ class UserCityWeather(commands.Cog):
         cond = current.get("condition") or {}
         desc = cond.get("text") or "—"
         icon_url = f"https:{cond.get('icon')}" if cond.get("icon") else None
-        weather_code = int(cond.get("code") or 1000)
-        emoji = self._emoji_from_weatherapi_code(weather_code)
-
+        code = int(cond.get("code") or 1000)
+        emoji = self._emoji_from_weatherapi_code(code)
         weather_text = f"{emoji} {desc}, {temp} °C"
 
-        # ----- heure par heure (prochaines 12h) -----
+        # ---- heure par heure (prochaines HOURLY_COUNT heures) ----
         hourly_lines = []
         try:
-            forecast_hours = data["forecast"]["forecastday"][0]["hour"]
+            hours = data["forecast"]["forecastday"][0]["hour"]
         except Exception:
-            forecast_hours = []
+            hours = []
 
-        # on part de l'heure locale du lieu (fourni par WeatherAPI)
         now_local_epoch = int(location.get("localtime_epoch") or 0)
         count = 0
-        for h in forecast_hours:
+        for h in hours:
             t_epoch = int(h.get("time_epoch") or 0)
             if t_epoch < now_local_epoch:
                 continue
-            # format heure locale HHh
-            # (WeatherAPI renvoie time local sous forme 'YYYY-MM-DD HH:MM')
-            t_str = h.get("time") or ""
+
+            # Heure locale affichée "HHh"
+            t_str = h.get("time") or ""  # format "YYYY-MM-DD HH:MM"
             hour_txt = t_str[-5:-3] + "h" if len(t_str) >= 16 else "—"
 
             h_cond = h.get("condition") or {}
             h_code = int(h_cond.get("code") or 1000)
             h_emoji = self._emoji_from_weatherapi_code(h_code)
             h_temp = round(h.get("temp_c") or 0)
-            # prob pluie
+
+            # prob pluie %
             pop = h.get("chance_of_rain")
             try:
                 pop = int(pop)
             except Exception:
                 pop = 0
-            # pluie mm
+
+            # cumul pluie (mm)
             rain_mm = h.get("precip_mm")
             try:
                 rain_mm = float(rain_mm or 0.0)
@@ -228,7 +284,7 @@ class UserCityWeather(commands.Cog):
             if count >= HOURLY_COUNT:
                 break
 
-        # split en blocs <= 1000 chars pour champ Discord
+        # Split en blocs pour respecter la limite de 1024 chars/field
         blocks = []
         chunk = ""
         for line in hourly_lines:
@@ -242,8 +298,8 @@ class UserCityWeather(commands.Cog):
 
         return weather_text, icon_url, blocks
 
-    # -------------------- news --------------------
-    async def build_news_embed(self, city):
+    # ---------------------- Actus (GNews) ----------------------
+    async def build_news_embed(self, city: str):
         async with aiohttp.ClientSession() as session:
             query = quote(city)
             url = f"https://gnews.io/api/v4/search?q={query}&lang=fr&max=3&token={GNEWS_API_KEY}"
@@ -268,8 +324,17 @@ class UserCityWeather(commands.Cog):
             if title and url:
                 news_text += f"**{title}**\n{url}\n\n"
 
-        embed.add_field(name="🗞️ Sélection des actualités", value=news_text or "Aucune actu trouvée.", inline=False)
+        embed.add_field(
+            name="🗞️ Sélection des actualités",
+            value=news_text or "Aucune actu trouvée.",
+            inline=False
+        )
         return embed
+
+    # ---------------------- Lifecycle ----------------------
+    def cog_unload(self):
+        self.daily_weather_and_news.cancel()
+        logger.info("[UserCityWeather] Tâche arrêtée")
 
 
 async def setup(bot):
