@@ -4,6 +4,9 @@ from discord.ext import commands, tasks
 import aiohttp
 import json
 import os
+import re
+import unicodedata
+from typing import Optional, List, Tuple
 from datetime import datetime, timezone
 import pytz
 from urllib.parse import quote
@@ -27,7 +30,7 @@ class UserCityWeather(commands.Cog):
     """
     - !ville <ville>     : enregistre la ville de l'utilisateur
     - !delville          : supprime la ville enregistrée
-    - !meteo [ville]     : envoie la météo + horaire **en DM** et supprime la commande du salon
+    - !meteo [ville]     : **DM** météo + horaire; supprime la commande du salon
 
     Envoi quotidien en DM à l'heure SEND_HOUR (Paris) avec une fenêtre de WINDOW_MINUTES.
     """
@@ -38,6 +41,94 @@ class UserCityWeather(commands.Cog):
         self.last_daily_date = None  # évite les doublons d'envoi quotidien
         self.daily_weather_and_news.start()
         logger.info("[UserCityWeather] Tâche quotidienne météo/actu démarrée")
+
+    # ------------- Helpers normalisation villes -------------
+    def _strip_accents(self, s: str) -> str:
+        """'Avrillé' -> 'Avrille' (sans dépendance externe)."""
+        return ''.join(
+            c for c in unicodedata.normalize('NFKD', s)
+            if not unicodedata.combining(c)
+        )
+
+    def _clean_spaces(self, s: str) -> str:
+        return re.sub(r"\s+", " ", s).strip()
+
+    def _city_query_variants(self, city: str) -> List[str]:
+        """
+        Génère plusieurs variantes robustes pour la recherche:
+        - original
+        - sans accents
+        - tirets -> espaces
+        - sans apostrophes
+        - sans ponctuation
+        - + variantes ' France'
+        """
+        base = self._clean_spaces(city)
+        acc = self._strip_accents(base)
+
+        def hyphen_to_space(s: str) -> str:
+            return self._clean_spaces(s.replace("-", " "))
+
+        def remove_apostrophes(s: str) -> str:
+            return self._clean_spaces(s.replace("’", " ").replace("'", " "))
+
+        def remove_punct(s: str) -> str:
+            return self._clean_spaces(re.sub(r"[^A-Za-z0-9\s]", " ", s))
+
+        variants = {
+            base,
+            acc,
+            hyphen_to_space(base),
+            hyphen_to_space(acc),
+            remove_apostrophes(base),
+            remove_apostrophes(acc),
+            remove_punct(base),
+            remove_punct(acc),
+        }
+
+        # versions focalisées France (aide à désambigüer)
+        more = set()
+        for v in list(variants):
+            if "france" not in v.lower():
+                more.add(self._clean_spaces(v + " France"))
+        variants |= more
+
+        # garde l'ordre stable: prioriser base, acc, puis le reste
+        ordered = []
+        for cand in [base, acc]:
+            if cand and cand not in ordered:
+                ordered.append(cand)
+        for cand in variants:
+            if cand and cand not in ordered:
+                ordered.append(cand)
+
+        # Limite raisonnable d'appels API
+        return ordered[:10]
+
+    # ------------- Résolution WeatherAPI -> lat/lon -------------
+    async def _resolve_city_weatherapi(self, city: str) -> Optional[Tuple[str, float, float]]:
+        """
+        Utilise /search.json pour trouver la ville; renvoie (name, lat, lon) ou None.
+        Essaie plusieurs variantes robustes (accents, tirets, etc.).
+        """
+        async with aiohttp.ClientSession() as session:
+            for q in self._city_query_variants(city):
+                url = f"http://api.weatherapi.com/v1/search.json?key={WEATHER_API_KEY}&q={quote(q)}"
+                try:
+                    async with session.get(url, timeout=12) as resp:
+                        data = await resp.json(content_type=None)
+                        if resp.status != 200 or not isinstance(data, list) or not data:
+                            continue
+                        # Priorité France si présent
+                        fr = [x for x in data if (x.get("country") == "France")]
+                        pick = fr[0] if fr else data[0]
+                        name = pick.get("name") or q
+                        lat = float(pick["lat"])
+                        lon = float(pick["lon"])
+                        return name, lat, lon
+                except Exception as e:
+                    logger.debug(f"[Meteo] search.json '{q}' -> {e}")
+        return None
 
     # ------------- Persistance villes -------------
     def load_city_data(self):
@@ -108,7 +199,7 @@ class UserCityWeather(commands.Cog):
     @commands.command(name="meteo")
     async def meteo_now(self, ctx, *, city: str = None):
         """Envoie la météo en DM et supprime la commande du salon."""
-        # 1) Supprime immédiatement la commande dans le salon
+        # 1) Supprime immédiatement la commande
         try:
             await ctx.message.delete()
         except (discord.Forbidden, discord.HTTPException):
@@ -118,7 +209,6 @@ class UserCityWeather(commands.Cog):
         if city is None:
             city = self.load_city_data().get(str(ctx.author.id))
         if not city:
-            # DM si possible, sinon message bref dans le salon
             try:
                 await ctx.author.send("❌ Aucune ville enregistrée. Utilise `!ville <ta_ville>` ou `!meteo <ville>`.")
             except discord.Forbidden:
@@ -126,16 +216,14 @@ class UserCityWeather(commands.Cog):
                 await msg.delete(delay=8)
             return
 
-        # 3) Récupère météo + heure par heure, construit et envoie en DM (deux embeds : météo puis actus)
+        # 3) Récupère météo + envoie 2 embeds en DM (météo, puis actus)
         try:
             weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
             weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
             news_embed = await self.build_news_embed(city)
-
             await ctx.author.send(embeds=[weather_embed, news_embed])
 
         except discord.Forbidden:
-            # DM fermés → message bref dans le salon
             msg = await ctx.reply("❌ Impossible d'envoyer un DM. Ouvre tes messages privés pour recevoir la météo.", mention_author=False)
             await msg.delete(delay=8)
 
@@ -150,10 +238,7 @@ class UserCityWeather(commands.Cog):
     # ------------------ Tâche quotidienne ------------------
     @tasks.loop(minutes=5)
     async def daily_weather_and_news(self):
-        """
-        Check toutes les 5 min : si on est dans la fenêtre SEND_HOUR:[00..WINDOW_MINUTES-1] (heure Paris)
-        et qu'on n'a pas encore envoyé aujourd'hui → envoi en DM à tous les utilisateurs enregistrés.
-        """
+        """Envoi quotidien en DM dans la fenêtre SEND_HOUR..SEND_HOUR+WINDOW_MINUTES (heure Paris)."""
         now_paris = datetime.now(timezone.utc).astimezone(self.paris_tz)
         if self.last_daily_date == now_paris.date():
             return
@@ -166,11 +251,9 @@ class UserCityWeather(commands.Cog):
                 user = await self.bot.fetch_user(int(user_id))
                 if not user:
                     continue
-
                 weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
                 weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
                 news_embed = await self.build_news_embed(city)
-
                 await user.send(embeds=[weather_embed, news_embed])
                 logger.info(f"[UserCityWeather] Météo envoyée à {user} ({city})")
             except discord.Forbidden:
@@ -197,18 +280,23 @@ class UserCityWeather(commands.Cog):
 
     async def get_weather_with_hourly(self, city: str):
         """
-        Retourne (weather_text:str, icon_url:str|None, hourly_blocks:list[str])
-        hourly_blocks : 1..n chaînes <= ~1000 caractères chacune (Discord: 1024 max par field).
+        Retourne (weather_text:str, icon_url:Optional[str], hourly_blocks:List[str])
+        - Résout la ville via search.json (accents, tirets, etc.)
+        - Appelle forecast.json sur lat,lon (fiable)
         """
-        encoded_city = quote(city)
+        resolved = await self._resolve_city_weatherapi(city)
+        if not resolved:
+            return "Ville introuvable ou erreur météo.", None, []
+        resolved_name, lat, lon = resolved
+
         url = (
-            f"http://api.weatherapi.com/v1/forecast.json"
-            f"?key={WEATHER_API_KEY}&lang=fr&q={encoded_city}"
-            f"&days=1&aqi=no&alerts=no"
+            "http://api.weatherapi.com/v1/forecast.json"
+            f"?key={WEATHER_API_KEY}&lang=fr&q={lat},{lon}"
+            "&days=1&aqi=no&alerts=no"
         )
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
+            async with session.get(url, timeout=20) as resp:
                 try:
                     data = await resp.json(content_type=None)
                 except Exception as e:
@@ -219,12 +307,13 @@ class UserCityWeather(commands.Cog):
                     logger.warning(f"[Météo] {city} — HTTP {resp.status} — {data}")
                     return "Ville introuvable ou erreur météo.", None, []
 
-        # ---- courant ----
         if "current" not in data or "location" not in data:
             return "Ville introuvable ou erreur météo.", None, []
 
         current = data["current"]
         location = data["location"]
+
+        # ---- bloc conditions actuelles ----
         temp = round(current.get("temp_c") or 0)
         cond = current.get("condition") or {}
         desc = cond.get("text") or "—"
@@ -247,8 +336,7 @@ class UserCityWeather(commands.Cog):
             if t_epoch < now_local_epoch:
                 continue
 
-            # Heure locale affichée "HHh"
-            t_str = h.get("time") or ""  # format "YYYY-MM-DD HH:MM"
+            t_str = h.get("time") or ""  # "YYYY-MM-DD HH:MM"
             hour_txt = t_str[-5:-3] + "h" if len(t_str) >= 16 else "—"
 
             h_cond = h.get("condition") or {}
@@ -256,14 +344,12 @@ class UserCityWeather(commands.Cog):
             h_emoji = self._emoji_from_weatherapi_code(h_code)
             h_temp = round(h.get("temp_c") or 0)
 
-            # prob pluie %
             pop = h.get("chance_of_rain")
             try:
                 pop = int(pop)
             except Exception:
                 pop = 0
 
-            # cumul pluie (mm)
             rain_mm = h.get("precip_mm")
             try:
                 rain_mm = float(rain_mm or 0.0)
@@ -277,9 +363,8 @@ class UserCityWeather(commands.Cog):
             if count >= HOURLY_COUNT:
                 break
 
-        # Split en blocs pour respecter la limite de 1024 chars/field
-        blocks = []
-        chunk = ""
+        # Split pour limites Discord
+        blocks, chunk = [], ""
         for line in hourly_lines:
             if len(chunk) + len(line) + 1 > 1000:
                 blocks.append(chunk)
@@ -292,7 +377,7 @@ class UserCityWeather(commands.Cog):
         return weather_text, icon_url, blocks
 
     # ------------------ Embeds ------------------
-    def build_weather_embed(self, city: str, weather_text: str, icon_url: str | None, hourly_blocks: list[str]) -> discord.Embed:
+    def build_weather_embed(self, city: str, weather_text: str, icon_url: Optional[str], hourly_blocks: List[str]) -> discord.Embed:
         now_local = datetime.now(timezone.utc).astimezone(self.paris_tz).strftime("%d/%m/%Y")
         embed = discord.Embed(
             title=f"🌤️ Météo — {city} ({now_local})",
@@ -313,8 +398,7 @@ class UserCityWeather(commands.Cog):
     # ---------------------- Actus (GNews) ----------------------
     async def build_news_embed(self, city: str) -> discord.Embed:
         """
-        Essaie d'abord une recherche sur la ville (fr).
-        Si aucune actu, fallback sur les top headlines France.
+        Recherche actus avec variantes (accents/hyphens/etc.). Fallback top headlines FR.
         """
         today = datetime.now(self.paris_tz).strftime("%d/%m/%Y")
         embed = discord.Embed(
@@ -326,27 +410,29 @@ class UserCityWeather(commands.Cog):
         source_label = f"🗞️ Actus près de {city}"
         try:
             async with aiohttp.ClientSession() as session:
-                # 1) Recherche ciblée ville
-                q = quote(f"\"{city}\"")
-                url_city = f"https://gnews.io/api/v4/search?q={q}&lang=fr&max=4&token={GNEWS_API_KEY}"
-                async with session.get(url_city) as resp1:
-                    data1 = await resp1.json(content_type=None)
-                    if resp1.status == 200:
-                        articles = data1.get("articles", []) or []
+                # Essais multiples avec variantes
+                for q_raw in self._city_query_variants(city):
+                    q = quote(f"\"{q_raw}\"")
+                    url_city = f"https://gnews.io/api/v4/search?q={q}&lang=fr&max=4&token={GNEWS_API_KEY}"
+                    async with session.get(url_city, timeout=12) as resp1:
+                        d1 = await resp1.json(content_type=None)
+                        if resp1.status == 200:
+                            articles = d1.get("articles", []) or []
+                            if articles:
+                                break
 
-                # 2) Fallback top headlines FR si rien
+                # Fallback top headlines FR
                 if not articles:
                     source_label = "🇫🇷 À la une en France"
                     url_fr = f"https://gnews.io/api/v4/top-headlines?country=fr&lang=fr&max=4&token={GNEWS_API_KEY}"
-                    async with session.get(url_fr) as resp2:
-                        data2 = await resp2.json(content_type=None)
+                    async with session.get(url_fr, timeout=12) as resp2:
+                        d2 = await resp2.json(content_type=None)
                         if resp2.status == 200:
-                            articles = data2.get("articles", []) or []
+                            articles = d2.get("articles", []) or []
 
         except Exception as e:
             logger.warning(f"[News] Erreur récupération actus: {e}")
 
-        # Construire le bloc
         if not articles:
             news_text = "Aucune actu trouvée."
         else:
@@ -358,12 +444,16 @@ class UserCityWeather(commands.Cog):
                     lines.append(f"• **{title}**\n{url}")
                 else:
                     lines.append(f"• **{title}**")
-            # éviter de dépasser 1024 caractères
-            news_text = ""
+            # Limite Discord 1024 chars/field
+            news_text, cur = "", ""
             for line in lines:
-                if len(news_text) + len(line) + 1 > 1000:
-                    break
-                news_text += (("\n" if news_text else "") + line)
+                if len(cur) + len(line) + 1 > 1000:
+                    news_text += (("\n" if news_text else "") + cur)
+                    cur = line
+                else:
+                    cur += (("\n" if cur else "") + line)
+            if cur:
+                news_text += (("\n" if news_text else "") + cur)
 
         embed.add_field(name=source_label, value=news_text, inline=False)
         embed.set_footer(text="Source: GNews")
