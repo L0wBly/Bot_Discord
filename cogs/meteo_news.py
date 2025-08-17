@@ -13,6 +13,7 @@ from urllib.parse import quote
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from html import unescape
+import difflib
 
 from config import (
     WEATHER_API_KEY,
@@ -24,11 +25,11 @@ from utils.logger import logger
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
 # --------- Paramètres ----------
-# Envoi quotidien (heure locale Paris) -> à 10h comme demandé
-SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "10"))
-WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))  # fenêtre de 10 min
-NEWS_DEFAULT_PERIOD = os.getenv("NEWS_DEFAULT_PERIOD", "jour").lower()  # 'jour' ou 'semaine'
-MAX_NEWS = int(os.getenv("MAX_NEWS", "6"))  # nb d'articles à afficher
+# Envoi quotidien (heure locale Paris)
+SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "10"))           # 10h par défaut
+WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10")) # fenêtre 10 min
+NEWS_DEFAULT_PERIOD = os.getenv("NEWS_DEFAULT_PERIOD", "jour").lower()  # 'jour' | 'semaine'
+MAX_NEWS = int(os.getenv("MAX_NEWS", "6"))                    # nb d'articles à afficher
 
 HOURLY_COUNT = 24  # on affiche 00→23
 
@@ -470,12 +471,36 @@ class UserCityWeather(commands.Cog):
         embed.set_footer(text="Source: WeatherAPI")
         return embed
 
+    # ---------- Déduplication titres actus ----------
+    def _normalize_title(self, title: str) -> str:
+        # coupe tout ce qui suit " - ", " | ", "–", "—" (souvent le média)
+        base = re.split(r"\s[-|–—]\s", title, maxsplit=1)[0]
+        base = ''.join(c for c in unicodedata.normalize('NFKD', base.lower()) if not unicodedata.combining(c))
+        base = re.sub(r"[^a-z0-9 ]+", " ", base)
+        base = re.sub(r"\s+", " ", base).strip()
+        return base
+
+    def _dedupe_articles(self, items: List[Tuple[str, str, datetime]], max_items: int):
+        """items = List[(title, url, pubdate)]. Garde 1 seul article par sujet (fuzzy)."""
+        items.sort(key=lambda x: x[2], reverse=True)
+        kept, seen_norm = [], []
+        for t, u, p in items:
+            nt = self._normalize_title(t)
+            if any(difflib.SequenceMatcher(None, nt, s).ratio() >= 0.9 for s in seen_norm):
+                continue
+            seen_norm.append(nt)
+            kept.append((t, u, p))
+            if len(kept) >= max_items:
+                break
+        return kept
+
     # ---------- Actus (GNews + fallback Google News RSS) ----------
     async def build_news_embed(self, city: Optional[str], period: str = "jour") -> discord.Embed:
         """
         period: 'jour' (24h) ou 'semaine' (7 jours).
         1) Tente GNews (clé si dispo)
         2) Fallback Google News RSS (pas de clé)
+        + DÉDUP titres entre sources proches
         """
         period = (period or "jour").lower()
         delta = timedelta(days=7 if period == "semaine" else 1)
@@ -487,14 +512,14 @@ class UserCityWeather(commands.Cog):
 
         articles: List[Tuple[str, str, datetime]] = []
 
-        # ---- 1) GNews (si clé dispo) ----
+        # ---- 1) GNews ----
         if GNEWS_API_KEY:
             try:
                 async with aiohttp.ClientSession() as session:
                     if city:
                         for q_raw in self._city_query_variants(city):
                             q = quote(q_raw)
-                            url = f"https://gnews.io/api/v4/search?q={q}&lang=fr&max={MAX_NEWS}&token={GNEWS_API_KEY}"
+                            url = f"https://gnews.io/api/v4/search?q={q}&lang=fr&max={MAX_NEWS*3}&token={GNEWS_API_KEY}"
                             async with session.get(url, timeout=12) as r:
                                 d = await r.json(content_type=None)
                                 if r.status == 200 and d.get("articles"):
@@ -511,21 +536,20 @@ class UserCityWeather(commands.Cog):
                                     if articles:
                                         break
                     if not articles:
-                        url = f"https://gnews.io/api/v4/top-headlines?country=fr&lang=fr&max={MAX_NEWS}&token={GNEWS_API_KEY}"
-                        async with aiohttp.ClientSession() as session2:
-                            async with session2.get(url, timeout=12) as r2:
-                                d2 = await r2.json(content_type=None)
-                                if r2.status == 200 and d2.get("articles"):
-                                    for a in d2["articles"]:
-                                        t = (a.get("title") or "").strip()
-                                        u = a.get("url")
-                                        pd = a.get("publishedAt")
-                                        try:
-                                            pub = datetime.fromisoformat(pd.replace("Z", "+00:00")).astimezone(self.paris_tz)
-                                        except Exception:
-                                            pub = datetime.now(self.paris_tz)
-                                        if pub >= since_dt and t and u:
-                                            articles.append((t, u, pub))
+                        url = f"https://gnews.io/api/v4/top-headlines?country=fr&lang=fr&max={MAX_NEWS*3}&token={GNEWS_API_KEY}"
+                        async with session.get(url, timeout=12) as r2:
+                            d2 = await r2.json(content_type=None)
+                            if r2.status == 200 and d2.get("articles"):
+                                for a in d2["articles"]:
+                                    t = (a.get("title") or "").strip()
+                                    u = a.get("url")
+                                    pd = a.get("publishedAt")
+                                    try:
+                                        pub = datetime.fromisoformat(pd.replace("Z", "+00:00")).astimezone(self.paris_tz)
+                                    except Exception:
+                                        pub = datetime.now(self.paris_tz)
+                                    if pub >= since_dt and t and u:
+                                        articles.append((t, u, pub))
             except Exception as e:
                 logger.debug(f"[News] GNews erreur: {e}")
 
@@ -552,11 +576,13 @@ class UserCityWeather(commands.Cog):
                         pub = datetime.now(self.paris_tz)
                     if pub >= since_dt and title and link:
                         articles.append((title, link, pub))
-                articles.sort(key=lambda x: x[2], reverse=True)
-                articles = articles[:MAX_NEWS]
             except Exception as e:
                 logger.debug(f"[News] RSS erreur: {e}")
 
+        # -------- DÉDUP & limite --------
+        articles = self._dedupe_articles(articles, MAX_NEWS)
+
+        # -------- Rendu --------
         if not articles:
             news_text = "Aucune actu trouvée."
         else:
