@@ -30,9 +30,9 @@ HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "24"))      # non utilisé di
 
 class UserCityWeather(commands.Cog):
     """
-    - !ville <ville>  : enregistre la ville de l'utilisateur
-    - !delville       : supprime la ville enregistrée
-    - !meteo [ville]  : **DM** météo + heure-par-heure (00h→23h du jour), la commande est supprimée du salon
+    - !ville [nom]   : sans argument → DM la ville enregistrée ; avec argument → enregistre la ville
+    - !delville      : supprime la ville enregistrée
+    - !meteo [ville] : **DM** météo + heure-par-heure (00h→23h du jour), la commande est supprimée du salon
     """
 
     def __init__(self, bot):
@@ -120,17 +120,64 @@ class UserCityWeather(commands.Cog):
 
     # ---------- Commandes ----------
     @commands.command(name="ville")
-    async def set_city(self, ctx, *, city: str):
-        user_id = str(ctx.author.id)
-        try:
-            await ctx.message.delete()
-        except (discord.Forbidden, discord.HTTPException):
-            pass
+    async def city_cmd(self, ctx, *, city: str = None):
+        """
+        !ville <nom> → enregistre la ville.
+        !ville       → DM la ville enregistrée.
+        Le message de commande est supprimé si possible.
+        """
+        # suppression message si possible
+        if ctx.guild:
+            try:
+                me = ctx.guild.me or discord.utils.get(ctx.guild.members, id=self.bot.user.id)
+                perms = ctx.channel.permissions_for(me) if me else None
+                if perms and perms.manage_messages:
+                    try:
+                        await ctx.message.delete()
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+                else:
+                    try:
+                        warn = await ctx.reply(
+                            "ℹ️ Je n'ai pas la permission **Gérer les messages** ici, je ne peux pas supprimer ta commande.",
+                            mention_author=False,
+                        )
+                        await warn.delete(delay=5)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        else:
+            try:
+                await ctx.message.delete()
+            except Exception:
+                pass
 
+        user_id = str(ctx.author.id)
         cities = self.load_city_data()
+
+        # Afficher la ville enregistrée si aucun argument
+        if city is None:
+            saved = cities.get(user_id)
+            if saved:
+                try:
+                    await ctx.author.send(f"🏙️ Ta ville enregistrée est : **{saved}**")
+                except discord.Forbidden:
+                    m = await ctx.reply("✉️ Ouvre tes DM pour recevoir ta ville enregistrée.", mention_author=False)
+                    await m.delete(delay=6)
+            else:
+                try:
+                    await ctx.author.send("❌ Tu n'as pas encore enregistré de ville. Utilise `!ville <ta_ville>`.")
+                except discord.Forbidden:
+                    m = await ctx.reply("❌ Aucune ville enregistrée. Utilise `!ville <ta_ville>`.", mention_author=False)
+                    await m.delete(delay=6)
+            return
+
+        # Sinon: enregistrer la nouvelle ville
         cities[user_id] = city.strip()
         self.save_city_data(cities)
 
+        # petit retour (dans le salon, auto-supprimé)
         try:
             msg = await ctx.send("✅ Ta ville a bien été enregistrée pour la météo quotidienne !")
             await msg.delete(delay=5)
@@ -163,7 +210,7 @@ class UserCityWeather(commands.Cog):
     @commands.command(name="meteo")
     async def meteo_now(self, ctx, *, city: str = None):
         """Envoie la météo en DM (00h→23h du jour) et supprime la commande du salon si possible."""
-        # --- suppression immédiate de la commande si le bot peut ---
+        # suppression immédiate si possible
         if ctx.guild:
             try:
                 me = ctx.guild.me or discord.utils.get(ctx.guild.members, id=self.bot.user.id)
@@ -185,13 +232,12 @@ class UserCityWeather(commands.Cog):
             except Exception:
                 pass
         else:
-            # si MP avec le bot
             try:
                 await ctx.message.delete()
             except Exception:
                 pass
 
-        # --- ville cible ---
+        # ville cible
         if city is None:
             city = self.load_city_data().get(str(ctx.author.id))
         if not city:
@@ -202,7 +248,7 @@ class UserCityWeather(commands.Cog):
                 await m.delete(delay=8)
             return
 
-        # --- envoi DM ---
+        # envoi DM
         try:
             weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
             weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
