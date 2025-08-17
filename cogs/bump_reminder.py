@@ -184,51 +184,47 @@ class BumpReminder(commands.Cog):
     async def member_purge_task(self):
         await self.bot.wait_until_ready()
         channel = self.bot.get_channel(BUMP_CHANNEL_ID)
-        if not isinstance(channel, discord.TextChannel):
-            logger.warning("[BumpReminder] Salon introuvable pour la purge membres.")
+        if channel is None:
+            logger.warning("[BumpReminder] Salon introuvable pour la purge membres (BUMP_CHANNEL_ID).")
             return
 
-        to_delete = []
         try:
-            # On scanne un peu large pour récolter jusqu'à 100 messages de membres
-            async for m in channel.history(limit=500):
-                if m.pinned:
-                    continue
-                if m.author.bot:  # protège Disboard + tous les bots (dont ce cog)
-                    continue
-
-                # Bulk delete impossible au-delà de 14 jours -> on filtre
-                age_seconds = (datetime.now(timezone.utc) - m.created_at.replace(tzinfo=timezone.utc)).total_seconds()
-                if age_seconds >= 14 * 24 * 3600:
-                    continue
-
-                to_delete.append(m)
-                if len(to_delete) == 100:
-                    break
-
-            if not to_delete:
+            # 1) Tentative purge côté serveur : rapide et fiable (<14 jours)
+            deleted = await channel.purge(
+                limit=100,
+                check=lambda m: (not m.pinned) and (not m.author.bot),
+                bulk=True,
+                reason="Purge auto bump: messages de membres (toutes les 5 min)"
+            )
+            if deleted:
+                logger.info(f"[BumpReminder] {len(deleted)} messages de membres supprimés via purge() dans #{channel.name}.")
                 return
 
-            # Tentative en suppression groupée
-            try:
-                await channel.delete_messages(to_delete)
-                logger.info(f"[BumpReminder] {len(to_delete)} messages de membres supprimés (bulk) dans #{channel.name}.")
-            except Exception as e:
-                # Fallback : suppression individuelle si l'API refuse la bulk pour une raison quelconque
-                logger.warning(f"[BumpReminder] Bulk delete a échoué ({e}), fallback en suppression individuelle.")
-                deleted = 0
-                for msg in to_delete:
-                    try:
-                        await msg.delete()
-                        deleted += 1
-                    except Exception:
-                        pass
-                if deleted:
-                    logger.info(f"[BumpReminder] {deleted} messages de membres supprimés (fallback) dans #{channel.name}.")
         except discord.Forbidden:
-            logger.error("[BumpReminder] Permissions insuffisantes pour supprimer des messages (Manage Messages).")
+            logger.error("[BumpReminder] Permissions insuffisantes (Manage Messages + Read Message History).")
+            return
+        except discord.HTTPException as e:
+            logger.warning(f"[BumpReminder] purge() a échoué ({e}); on tente un fallback individuel.")
+
+        # 2) Fallback : suppression individuelle si la purge bulk a échoué
+        try:
+            count = 0
+            async for m in channel.history(limit=300):
+                if m.pinned or m.author.bot:
+                    continue
+                try:
+                    await m.delete()
+                    count += 1
+                    if count >= 100:
+                        break
+                except Exception:
+                    pass
+            if count:
+                logger.info(f"[BumpReminder] {count} messages de membres supprimés (fallback individuel) dans #{channel.name}.")
+        except discord.Forbidden:
+            logger.error("[BumpReminder] Permissions insuffisantes pour lire/supprimer l’historique.")
         except Exception as e:
-            logger.error(f"[BumpReminder] Erreur pendant la purge des messages membres : {e}")
+            logger.error(f"[BumpReminder] Erreur pendant la purge fallback : {e}")
 
     @member_purge_task.before_loop
     async def before_member_purge(self):
