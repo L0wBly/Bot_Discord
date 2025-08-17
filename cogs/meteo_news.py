@@ -7,7 +7,7 @@ import os
 import re
 import unicodedata
 from typing import Optional, List, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pytz
 from urllib.parse import quote
 
@@ -23,7 +23,11 @@ DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 # Envoi quotidien (heure locale Paris)
 SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))             # 8h par défaut
 WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))  # fenêtre de 10 min
-HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "12"))      # nb d'heures à afficher
+
+# Affichage
+HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "12"))           # non utilisé directement ici mais dispo
+NEXT_DAY_EXTRA_HOURS = int(os.getenv("METEO_NEXTDAY_HOURS", "4"))   # 0..3 par défaut demain
+NEXTDAY_AFTER_HOUR   = int(os.getenv("METEO_NEXTDAY_AFTER_HOUR", "13"))  # n’ajouter demain qu’après 13h locale
 
 
 class UserCityWeather(commands.Cog):
@@ -93,7 +97,7 @@ class UserCityWeather(commands.Cog):
                 more.add(self._clean_spaces(v + " France"))
         variants |= more
 
-        # garde l'ordre stable: prioriser base, acc, puis le reste
+        # ordre stable: prioriser base, acc, puis le reste
         ordered = []
         for cand in [base, acc]:
             if cand and cand not in ordered:
@@ -102,7 +106,6 @@ class UserCityWeather(commands.Cog):
             if cand and cand not in ordered:
                 ordered.append(cand)
 
-        # Limite raisonnable d'appels API
         return ordered[:10]
 
     # ------------- Résolution WeatherAPI -> lat/lon -------------
@@ -283,6 +286,7 @@ class UserCityWeather(commands.Cog):
         Retourne (weather_text:str, icon_url:Optional[str], hourly_blocks:List[str])
         - Résout la ville via search.json (accents, tirets, etc.)
         - Appelle forecast.json sur lat,lon (fiable)
+        - Heures : reste du jour; +demain 0..NEXT_DAY_EXTRA_HOURS-1 uniquement après 13h locale
         """
         resolved = await self._resolve_city_weatherapi(city)
         if not resolved:
@@ -292,7 +296,7 @@ class UserCityWeather(commands.Cog):
         url = (
             "http://api.weatherapi.com/v1/forecast.json"
             f"?key={WEATHER_API_KEY}&lang=fr&q={lat},{lon}"
-            "&days=1&aqi=no&alerts=no"
+            "&days=2&aqi=no&alerts=no"
         )
 
         async with aiohttp.ClientSession() as session:
@@ -322,21 +326,60 @@ class UserCityWeather(commands.Cog):
         emoji = self._emoji_from_weatherapi_code(code)
         weather_text = f"{emoji} {desc}, {temp} °C"
 
-        # ---- heure par heure (prochaines HOURLY_COUNT heures) ----
-        hourly_lines = []
+        # ---- heure par heure (reste du jour; +demain 0..N-1 UNIQUEMENT après 13h) ----
+        hourly_lines: List[str] = []
         try:
-            hours = data["forecast"]["forecastday"][0]["hour"]
+            days = data["forecast"]["forecastday"]
         except Exception:
-            hours = []
+            days = []
 
-        now_local_epoch = int(location.get("localtime_epoch") or 0)
-        count = 0
-        for h in hours:
-            t_epoch = int(h.get("time_epoch") or 0)
-            if t_epoch < now_local_epoch:
+        hours_today = days[0].get("hour", []) if len(days) > 0 else []
+        hours_tomorrow = days[1].get("hour", []) if len(days) > 1 else []
+
+        # Fuseau local fiable via tz_id
+        tz_id = location.get("tz_id") or "Europe/Paris"
+        try:
+            tz = pytz.timezone(tz_id)
+        except Exception:
+            tz = pytz.timezone("Europe/Paris")
+
+        now_local = datetime.now(tz)
+        today_date = now_local.date()
+        tomorrow_date = today_date + timedelta(days=1)
+
+        # Reste du jour : toutes les heures >= maintenant jusqu'à 23h
+        selected = []
+        for h in hours_today:
+            t_str = h.get("time") or ""  # "YYYY-MM-DD HH:MM" local
+            try:
+                naive = datetime.strptime(t_str, "%Y-%m-%d %H:%M")
+                h_dt = tz.localize(naive)
+            except Exception:
                 continue
 
-            t_str = h.get("time") or ""  # "YYYY-MM-DD HH:MM"
+            if h_dt >= now_local and h_dt.date() == today_date:
+                selected.append(h)
+
+        # Ajouter demain (00..NEXT_DAY_EXTRA_HOURS-1) SEULEMENT si on est après NEXTDAY_AFTER_HOUR locale
+        if hours_tomorrow and NEXT_DAY_EXTRA_HOURS > 0 and now_local.hour >= NEXTDAY_AFTER_HOUR:
+            for h in hours_tomorrow:
+                t_str = h.get("time") or ""
+                try:
+                    naive = datetime.strptime(t_str, "%Y-%m-%d %H:%M")
+                    h_dt = tz.localize(naive)
+                except Exception:
+                    continue
+                if h_dt.date() == tomorrow_date and h_dt.hour < NEXT_DAY_EXTRA_HOURS:
+                    selected.append(h)
+
+        # Fallback ultra-bordure : s'il n'y a rien, on prend au moins la prochaine heure
+        if not selected:
+            pool = hours_today + hours_tomorrow
+            selected = pool[: max(1, NEXT_DAY_EXTRA_HOURS or 4)]
+
+        # Mise en forme des lignes
+        for h in selected:
+            t_str = h.get("time") or ""
             hour_txt = t_str[-5:-3] + "h" if len(t_str) >= 16 else "—"
 
             h_cond = h.get("condition") or {}
@@ -344,26 +387,23 @@ class UserCityWeather(commands.Cog):
             h_emoji = self._emoji_from_weatherapi_code(h_code)
             h_temp = round(h.get("temp_c") or 0)
 
+            # prob pluie %
             pop = h.get("chance_of_rain")
             try:
                 pop = int(pop)
             except Exception:
                 pop = 0
 
-            rain_mm = h.get("precip_mm")
+            # cumul pluie (mm)
             try:
-                rain_mm = float(rain_mm or 0.0)
+                rain_mm = float(h.get("precip_mm") or 0.0)
             except Exception:
                 rain_mm = 0.0
             rain_txt = f"{rain_mm:.1f}mm" if rain_mm > 0 else "—"
 
             hourly_lines.append(f"**{hour_txt}**  {h_emoji}  {h_temp}°C  *(POP {pop}%, pluie {rain_txt})*")
 
-            count += 1
-            if count >= HOURLY_COUNT:
-                break
-
-        # Split pour limites Discord
+        # Split pour respecter 1024 chars/field Discord
         blocks, chunk = [], ""
         for line in hourly_lines:
             if len(chunk) + len(line) + 1 > 1000:
