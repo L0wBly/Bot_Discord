@@ -27,7 +27,7 @@ class UserCityWeather(commands.Cog):
     """
     - !ville <ville>     : enregistre la ville de l'utilisateur
     - !delville          : supprime la ville enregistrée
-    - !meteo [ville]     : envoie la météo + horaire en DM et supprime la commande du salon
+    - !meteo [ville]     : envoie la météo + horaire **en DM** et supprime la commande du salon
 
     Envoi quotidien en DM à l'heure SEND_HOUR (Paris) avec une fenêtre de WINDOW_MINUTES.
     """
@@ -126,17 +126,13 @@ class UserCityWeather(commands.Cog):
                 await msg.delete(delay=8)
             return
 
-        # 3) Récupère météo + heure par heure, construit et envoie en DM
+        # 3) Récupère météo + heure par heure, construit et envoie en DM (deux embeds : météo puis actus)
         try:
             weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
-            embed = await self.build_news_embed(city)
-            embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
-            for idx, block in enumerate(hourly_blocks, start=1):
-                embed.add_field(name="🕒 Heure par heure" if idx == 1 else "🕒 (suite)", value=block, inline=False)
-            if icon_url:
-                embed.set_thumbnail(url=icon_url)
+            weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
+            news_embed = await self.build_news_embed(city)
 
-            await ctx.author.send(embed=embed)
+            await ctx.author.send(embeds=[weather_embed, news_embed])
 
         except discord.Forbidden:
             # DM fermés → message bref dans le salon
@@ -170,15 +166,12 @@ class UserCityWeather(commands.Cog):
                 user = await self.bot.fetch_user(int(user_id))
                 if not user:
                     continue
-                weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
-                embed = await self.build_news_embed(city)
-                embed.insert_field_at(0, name=f"🌤️ Météo à {city}", value=weather_text, inline=False)
-                for idx, block in enumerate(hourly_blocks, start=1):
-                    embed.add_field(name="🕒 Heure par heure" if idx == 1 else "🕒 (suite)", value=block, inline=False)
-                if icon_url:
-                    embed.set_thumbnail(url=icon_url)
 
-                await user.send(embed=embed)
+                weather_text, icon_url, hourly_blocks = await self.get_weather_with_hourly(city)
+                weather_embed = self.build_weather_embed(city, weather_text, icon_url, hourly_blocks)
+                news_embed = await self.build_news_embed(city)
+
+                await user.send(embeds=[weather_embed, news_embed])
                 logger.info(f"[UserCityWeather] Météo envoyée à {user} ({city})")
             except discord.Forbidden:
                 logger.warning(f"[UserCityWeather] DM refusé par {user_id}")
@@ -298,37 +291,82 @@ class UserCityWeather(commands.Cog):
 
         return weather_text, icon_url, blocks
 
-    # ---------------------- Actus (GNews) ----------------------
-    async def build_news_embed(self, city: str):
-        async with aiohttp.ClientSession() as session:
-            query = quote(city)
-            url = f"https://gnews.io/api/v4/search?q={query}&lang=fr&max=3&token={GNEWS_API_KEY}"
-            async with session.get(url) as resp:
-                try:
-                    data = await resp.json(content_type=None)
-                except Exception as e:
-                    logger.warning(f"[News] Erreur JSON : {e}")
-                    data = {}
+    # ------------------ Embeds ------------------
+    def build_weather_embed(self, city: str, weather_text: str, icon_url: str | None, hourly_blocks: list[str]) -> discord.Embed:
+        now_local = datetime.now(timezone.utc).astimezone(self.paris_tz).strftime("%d/%m/%Y")
+        embed = discord.Embed(
+            title=f"🌤️ Météo — {city} ({now_local})",
+            color=discord.Color.teal()
+        )
+        embed.add_field(name="Conditions", value=weather_text, inline=False)
+        for idx, block in enumerate(hourly_blocks, start=1):
+            embed.add_field(
+                name="🕒 Heure par heure" if idx == 1 else "🕒 (suite)",
+                value=block,
+                inline=False
+            )
+        if icon_url:
+            embed.set_thumbnail(url=icon_url)
+        embed.set_footer(text="Source: WeatherAPI")
+        return embed
 
-        articles = data.get("articles", [])
+    # ---------------------- Actus (GNews) ----------------------
+    async def build_news_embed(self, city: str) -> discord.Embed:
+        """
+        Essaie d'abord une recherche sur la ville (fr).
+        Si aucune actu, fallback sur les top headlines France.
+        """
         today = datetime.now(self.paris_tz).strftime("%d/%m/%Y")
         embed = discord.Embed(
-            title=f"📰 Actus du jour - {today}",
+            title=f"📰 Actus du jour — {today}",
             color=discord.Color.orange()
         )
 
-        news_text = ""
-        for article in articles:
-            title = article.get("title")
-            url = article.get("url")
-            if title and url:
-                news_text += f"**{title}**\n{url}\n\n"
+        articles = []
+        source_label = f"🗞️ Actus près de {city}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                # 1) Recherche ciblée ville
+                q = quote(f"\"{city}\"")
+                url_city = f"https://gnews.io/api/v4/search?q={q}&lang=fr&max=4&token={GNEWS_API_KEY}"
+                async with session.get(url_city) as resp1:
+                    data1 = await resp1.json(content_type=None)
+                    if resp1.status == 200:
+                        articles = data1.get("articles", []) or []
 
-        embed.add_field(
-            name="🗞️ Sélection des actualités",
-            value=news_text or "Aucune actu trouvée.",
-            inline=False
-        )
+                # 2) Fallback top headlines FR si rien
+                if not articles:
+                    source_label = "🇫🇷 À la une en France"
+                    url_fr = f"https://gnews.io/api/v4/top-headlines?country=fr&lang=fr&max=4&token={GNEWS_API_KEY}"
+                    async with session.get(url_fr) as resp2:
+                        data2 = await resp2.json(content_type=None)
+                        if resp2.status == 200:
+                            articles = data2.get("articles", []) or []
+
+        except Exception as e:
+            logger.warning(f"[News] Erreur récupération actus: {e}")
+
+        # Construire le bloc
+        if not articles:
+            news_text = "Aucune actu trouvée."
+        else:
+            lines = []
+            for a in articles:
+                title = (a.get("title") or "Sans titre").strip()
+                url = a.get("url")
+                if url:
+                    lines.append(f"• **{title}**\n{url}")
+                else:
+                    lines.append(f"• **{title}**")
+            # éviter de dépasser 1024 caractères
+            news_text = ""
+            for line in lines:
+                if len(news_text) + len(line) + 1 > 1000:
+                    break
+                news_text += (("\n" if news_text else "") + line)
+
+        embed.add_field(name=source_label, value=news_text, inline=False)
+        embed.set_footer(text="Source: GNews")
         return embed
 
     # ---------------------- Lifecycle ----------------------
