@@ -17,24 +17,24 @@ from config import (
 )
 from utils.logger import logger
 
-# --------- Fichiers & config ----------
+# --------- Fichier de persistance ----------
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/user_cities.json")
 
+# --------- Paramètres d'envoi ----------
 # Envoi quotidien (heure locale Paris)
 SEND_HOUR = int(os.getenv("METEO_SEND_HOUR", "8"))             # 8h par défaut
 WINDOW_MINUTES = int(os.getenv("METEO_WINDOW_MINUTES", "10"))  # fenêtre de 10 min
 
-# Affichage
-HOURLY_COUNT = int(os.getenv("METEO_HOURLY_COUNT", "12"))           # non utilisé directement ici mais dispo
-NEXT_DAY_EXTRA_HOURS = int(os.getenv("METEO_NEXTDAY_HOURS", "4"))   # 0..3 par défaut demain
-NEXTDAY_AFTER_HOUR   = int(os.getenv("METEO_NEXTDAY_AFTER_HOUR", "13"))  # n’ajouter demain qu’après 13h locale
+# Affichage des heures
+NEXT_DAY_EXTRA_HOURS = int(os.getenv("METEO_NEXTDAY_HOURS", "4"))        # 00..03 demain
+NEXTDAY_AFTER_HOUR   = int(os.getenv("METEO_NEXTDAY_AFTER_HOUR", "13"))  # n’ajoute demain qu’après 13h locale
 
 
 class UserCityWeather(commands.Cog):
     """
     - !ville <ville>     : enregistre la ville de l'utilisateur
     - !delville          : supprime la ville enregistrée
-    - !meteo [ville]     : **DM** météo + horaire; supprime la commande du salon
+    - !meteo [ville]     : **DM** météo + horaire (commande supprimée du salon)
 
     Envoi quotidien en DM à l'heure SEND_HOUR (Paris) avec une fenêtre de WINDOW_MINUTES.
     """
@@ -284,9 +284,12 @@ class UserCityWeather(commands.Cog):
     async def get_weather_with_hourly(self, city: str):
         """
         Retourne (weather_text:str, icon_url:Optional[str], hourly_blocks:List[str])
-        - Résout la ville via search.json (accents, tirets, etc.)
-        - Appelle forecast.json sur lat,lon (fiable)
-        - Heures : reste du jour; +demain 0..NEXT_DAY_EXTRA_HOURS-1 uniquement après 13h locale
+
+        - Résout la ville via search.json (accents/tirets/ponctuation gérés)
+        - Récupère forecast.json avec days=2 (aujourd'hui + demain)
+        - Heures affichées :
+            * t = maintenant(local) arrondi à l'heure → 23h aujourd'hui
+            * + 00h..NEXT_DAY_EXTRA_HOURS-1 demain UNIQUEMENT si now >= NEXTDAY_AFTER_HOUR
         """
         resolved = await self._resolve_city_weatherapi(city)
         if not resolved:
@@ -317,7 +320,7 @@ class UserCityWeather(commands.Cog):
         current = data["current"]
         location = data["location"]
 
-        # ---- bloc conditions actuelles ----
+        # --- Conditions actuelles ---
         temp = round(current.get("temp_c") or 0)
         cond = current.get("condition") or {}
         desc = cond.get("text") or "—"
@@ -326,8 +329,7 @@ class UserCityWeather(commands.Cog):
         emoji = self._emoji_from_weatherapi_code(code)
         weather_text = f"{emoji} {desc}, {temp} °C"
 
-        # ---- heure par heure (reste du jour; +demain 0..N-1 UNIQUEMENT après 13h) ----
-        hourly_lines: List[str] = []
+        # --- Heures : reste du jour + (demain 00..N-1 si after 13h) ---
         try:
             days = data["forecast"]["forecastday"]
         except Exception:
@@ -336,19 +338,29 @@ class UserCityWeather(commands.Cog):
         hours_today = days[0].get("hour", []) if len(days) > 0 else []
         hours_tomorrow = days[1].get("hour", []) if len(days) > 1 else []
 
-        # Fuseau local fiable via tz_id
+        # Fuseau & "maintenant" FIABLE via l’API (location.localtime)
         tz_id = location.get("tz_id") or "Europe/Paris"
         try:
             tz = pytz.timezone(tz_id)
         except Exception:
             tz = pytz.timezone("Europe/Paris")
 
-        now_local = datetime.now(tz)
-        today_date = now_local.date()
+        try:
+            # ex: "2025-08-17 18:12" (heure locale du lieu fournie par WeatherAPI)
+            lt_str = location.get("localtime")
+            naive_now = datetime.strptime(lt_str, "%Y-%m-%d %H:%M")
+            now_local = tz.localize(naive_now)
+        except Exception:
+            now_local = datetime.now(tz)
+
+        # Arrondi à l’heure pour inclure la tranche courante
+        floor_now = now_local.replace(minute=0, second=0, microsecond=0)
+        today_date = floor_now.date()
         tomorrow_date = today_date + timedelta(days=1)
 
-        # Reste du jour : toutes les heures >= maintenant jusqu'à 23h
         selected = []
+
+        # 1) Aujourd’hui : toutes les heures >= floor_now → 23h
         for h in hours_today:
             t_str = h.get("time") or ""  # "YYYY-MM-DD HH:MM" local
             try:
@@ -357,10 +369,10 @@ class UserCityWeather(commands.Cog):
             except Exception:
                 continue
 
-            if h_dt >= now_local and h_dt.date() == today_date:
+            if h_dt >= floor_now and h_dt.date() == today_date:
                 selected.append(h)
 
-        # Ajouter demain (00..NEXT_DAY_EXTRA_HOURS-1) SEULEMENT si on est après NEXTDAY_AFTER_HOUR locale
+        # 2) Demain : 00..NEXT_DAY_EXTRA_HOURS-1 UNIQUEMENT si now >= NEXTDAY_AFTER_HOUR
         if hours_tomorrow and NEXT_DAY_EXTRA_HOURS > 0 and now_local.hour >= NEXTDAY_AFTER_HOUR:
             for h in hours_tomorrow:
                 t_str = h.get("time") or ""
@@ -369,15 +381,17 @@ class UserCityWeather(commands.Cog):
                     h_dt = tz.localize(naive)
                 except Exception:
                     continue
+
                 if h_dt.date() == tomorrow_date and h_dt.hour < NEXT_DAY_EXTRA_HOURS:
                     selected.append(h)
 
-        # Fallback ultra-bordure : s'il n'y a rien, on prend au moins la prochaine heure
+        # Fallback : si, pour une raison quelconque, rien n’est sélectionné
         if not selected:
             pool = hours_today + hours_tomorrow
             selected = pool[: max(1, NEXT_DAY_EXTRA_HOURS or 4)]
 
         # Mise en forme des lignes
+        hourly_lines: List[str] = []
         for h in selected:
             t_str = h.get("time") or ""
             hour_txt = t_str[-5:-3] + "h" if len(t_str) >= 16 else "—"
@@ -388,9 +402,8 @@ class UserCityWeather(commands.Cog):
             h_temp = round(h.get("temp_c") or 0)
 
             # prob pluie %
-            pop = h.get("chance_of_rain")
             try:
-                pop = int(pop)
+                pop = int(h.get("chance_of_rain"))
             except Exception:
                 pop = 0
 
