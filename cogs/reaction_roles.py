@@ -32,7 +32,7 @@ EMOJI_ROLE_MAP = {
     "📝": ("Poète", ROLE_POETE_ID),
     "✍️": ("Écrivain", ROLE_ECRIVAIN_ID),
     "🌐": ("Bump", ROLE_BUMP_ID),
-    "🔔": ("Notifications News", ROLE_NOTIF_NEWS)
+    "🔔": ("Notifications News", ROLE_NOTIF_NEWS),
 }
 
 DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "role_stats.json")
