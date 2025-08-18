@@ -83,20 +83,23 @@ def parse_date(date_str: str, base_tz=PARIS_TZ) -> Optional[datetime.date]:
     except Exception:
         return None
 
-def parse_time(time_str: str) -> Optional[tuple[int, int]]:
-    s = time_str.strip().lower().replace("h", ":")
-    if re.match(r"^\d{1,2}$", s):
-        hh = int(s)
-        if 0 <= hh <= 23:
-            return hh, 0
-        return None
-    m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", s)
+def parse_time(time_str: str) -> tuple[int, int] | None:
+    s = time_str.strip().lower()
+
+    # Cas "16h" ou "16" -> minutes = 0
+    m = re.match(r"^(\d{1,2})h?$", s)
+    if m:
+        hh = int(m.group(1))
+        return (hh, 0) if 0 <= hh <= 23 else None
+
+    # Cas "9h30" ou "09:30"
+    s = s.replace("h", ":")
+    m = re.match(r"^(\d{1,2}):(\d{1,2})$", s)
     if not m:
         return None
     hh, mm = int(m.group(1)), int(m.group(2))
-    if 0 <= hh <= 23 and 0 <= mm <= 59:
-        return hh, mm
-    return None
+    return (hh, mm) if 0 <= hh <= 23 and 0 <= mm <= 59 else None
+
 
 # ---------- Construction rappels ----------
 def compute_reminders(event_dt: datetime, tz=PARIS_TZ) -> tuple[Optional[Reminder], Optional[Reminder]]:
