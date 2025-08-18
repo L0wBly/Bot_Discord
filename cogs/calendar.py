@@ -430,7 +430,7 @@ class Calendar(commands.Cog):
                                 f"⏰ **Rappel {label}**\n"
                                 f"• Quand : {evt_dt.strftime('%d/%m/%Y %H:%M')}\n"
                                 f"• Quoi  : {e['title']}\n"
-                                f"• ID : `{e['id']}`"
+                                f"• ID : `{e['||id||']}`"
                             )
                             e[key]["sent"] = True
                             changed = True
