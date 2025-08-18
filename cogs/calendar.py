@@ -16,14 +16,16 @@ from utils.logger import logger
 PARIS_TZ = pytz.timezone("Europe/Paris")
 DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/calendar_events.json")
 
-# Détecte si la lib a discord.ui (certaines versions anciennes ne l'ont pas)
+# Détection de l’UI (au cas où)
 HAVE_UI = hasattr(discord, "ui") and hasattr(discord.ui, "View")
+
 
 # ---------- Modèle ----------
 @dataclass
 class Reminder:
     time_iso: str
     sent: bool
+
 
 @dataclass
 class Event:
@@ -36,6 +38,7 @@ class Event:
     one_hour: Optional[Reminder]
     created_iso: str
 
+
 # ---------- Utils persistants ----------
 def _load_data() -> dict:
     if not os.path.exists(DATA_FILE):
@@ -47,10 +50,12 @@ def _load_data() -> dict:
         logger.warning("[Calendar] Fichier corrompu -> réinit.")
         return {"events": []}
 
+
 def _save_data(data: dict):
     os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 # ---------- Parsing date/heure ----------
 def parse_date(date_str: str, base_tz=PARIS_TZ) -> Optional[datetime.date]:
@@ -83,16 +88,17 @@ def parse_date(date_str: str, base_tz=PARIS_TZ) -> Optional[datetime.date]:
     except Exception:
         return None
 
-def parse_time(time_str: str) -> tuple[int, int] | None:
+
+def parse_time(time_str: str) -> Optional[tuple[int, int]]:
     s = time_str.strip().lower()
 
-    # Cas "16h" ou "16" -> minutes = 0
+    # "16h" ou "16" -> minutes = 0
     m = re.match(r"^(\d{1,2})h?$", s)
     if m:
         hh = int(m.group(1))
         return (hh, 0) if 0 <= hh <= 23 else None
 
-    # Cas "9h30" ou "09:30"
+    # "9h30" ou "09:30"
     s = s.replace("h", ":")
     m = re.match(r"^(\d{1,2}):(\d{1,2})$", s)
     if not m:
@@ -111,7 +117,8 @@ def compute_reminders(event_dt: datetime, tz=PARIS_TZ) -> tuple[Optional[Reminde
     oneh = Reminder(one_hour_dt.isoformat(), False) if one_hour_dt > now_local else None
     return prev, oneh
 
-# ---------- UI pour suppression (si disponible) ----------
+
+# ---------- UI pour suppression (si dispo) ----------
 if HAVE_UI:
     class DeleteEventView(discord.ui.View):
         def __init__(self, cog_ref: "Calendar", user_id: int, events_for_user: list[dict]):
@@ -120,7 +127,7 @@ if HAVE_UI:
             self.user_id = user_id
 
             options = []
-            for e in events_for_user[:25]:  # limite Discord
+            for e in events_for_user[:25]:
                 try:
                     evt_dt = datetime.fromisoformat(e["event_iso"]).astimezone(PARIS_TZ)
                 except Exception:
@@ -143,7 +150,10 @@ if HAVE_UI:
                 ev_id = select.values[0]
                 data = _load_data()
                 before = len(data.get("events", []))
-                data["events"] = [x for x in data.get("events", []) if not (x["user_id"] == self.user_id and x["id"] == ev_id)]
+                data["events"] = [
+                    x for x in data.get("events", [])
+                    if not (x["user_id"] == self.user_id and x["id"] == ev_id)
+                ]
                 _save_data(data)
 
                 if len(data.get("events", [])) < before:
@@ -156,12 +166,13 @@ if HAVE_UI:
 else:
     DeleteEventView = None  # fallback texte uniquement
 
+
 # ---------- Cog ----------
 class Calendar(commands.Cog):
     """
     !cal [date] [heure] [texte…] -> crée un événement + rappels (veille 21h, -1h)
     !cal_list -> DM la liste des événements à venir
-    !cal_del [id] -> sans id : menu en DM (si disponible) ; sinon liste texte + suppression par id
+    !cal_del [id] -> sans id : menu en DM (si UI) ; sinon liste + suppression par id
     Purge quotidienne à 23:30 (Heure de Paris) des évènements du jour.
     """
 
@@ -175,107 +186,107 @@ class Calendar(commands.Cog):
         self._tick.cancel()
         logger.info("[Calendar] Tick arrêté.")
 
-    # ------- Commandes -------
+    # ------------------- COMMANDES -------------------
     @commands.command(name="cal")
-async def add_event(self, ctx, date: str = None, heure: str = None, *, title: str = None):
-    """!cal [date] [heure] [texte...] (utilisable en DM ou en salon)"""
-    # Supprimer la commande en SALON si possible
-    if ctx.guild:
+    async def add_event(self, ctx, date: str = None, heure: str = None, *, title: str = None):
+        """!cal [date] [heure] [texte...] (utilisable en DM ou en salon)"""
+        # Supprimer la commande en salon si possible
+        if ctx.guild:
+            try:
+                perms = ctx.channel.permissions_for(ctx.guild.me)
+                if perms.manage_messages:
+                    await ctx.message.delete()
+            except Exception:
+                pass
+
+        # Vérifs args
+        if not (date and heure and title):
+            msg = ("❌ Usage : `!cal [date] [heure] [texte]`\n"
+                   "Exemples : `!cal 18/08 16h Rendez-vous dentiste` | `!cal demain 9:30 Réu`")
+            try:
+                await ctx.author.send(msg)
+            except discord.Forbidden:
+                await ctx.reply(msg, mention_author=False, delete_after=10)
+            return
+
+        evt_date = parse_date(date)
+        hm = parse_time(heure)
+        if not evt_date or not hm:
+            txt = "❌ Date/heure invalides. Ex : `17/08`, `17/08/2025`, `demain`, `16h`, `09:30`."
+            try:
+                await ctx.author.send(txt)
+            except discord.Forbidden:
+                await ctx.reply(txt, mention_author=False, delete_after=10)
+            return
+
+        hh, mm = hm
         try:
-            perms = ctx.channel.permissions_for(ctx.guild.me)
-            if perms.manage_messages:
-                await ctx.message.delete()
+            naive = datetime(evt_date.year, evt_date.month, evt_date.day, hh, mm, 0)
+            event_dt = PARIS_TZ.localize(naive)
         except Exception:
-            pass
+            try:
+                await ctx.author.send("❌ Date impossible.")
+            except discord.Forbidden:
+                await ctx.reply("❌ Date impossible.", mention_author=False, delete_after=10)
+            return
 
-    # Vérifs arguments
-    if not (date and heure and title):
-        msg = ("❌ Usage : `!cal [date] [heure] [texte]`\n"
-               "Exemples : `!cal 18/08 16h Rendez-vous dentiste` | `!cal demain 9:30 Réu`")
-        try:
-            await ctx.author.send(msg)
-        except discord.Forbidden:
-            await ctx.reply(msg, mention_author=False, delete_after=10)
-        return
+        now_local = datetime.now(timezone.utc).astimezone(PARIS_TZ)
+        if event_dt <= now_local:
+            txt = "❌ Cette date est déjà passée. Merci d'indiquer un rendez-vous futur."
+            try:
+                await ctx.author.send(txt)
+            except discord.Forbidden:
+                await ctx.reply(txt, mention_author=False, delete_after=10)
+            return
 
-    evt_date = parse_date(date)
-    hm = parse_time(heure)
-    if not evt_date or not hm:
-        txt = "❌ Date/heure invalides. Ex : `17/08`, `17/08/2025`, `demain`, `16h`, `09:30`."
-        try:
-            await ctx.author.send(txt)
-        except discord.Forbidden:
-            await ctx.reply(txt, mention_author=False, delete_after=10)
-        return
+        # Rappels
+        prev, oneh = compute_reminders(event_dt, PARIS_TZ)
 
-    hh, mm = hm
-    try:
-        naive = datetime(evt_date.year, evt_date.month, evt_date.day, hh, mm, 0)
-        event_dt = PARIS_TZ.localize(naive)
-    except Exception:
-        try:
-            await ctx.author.send("❌ Date impossible.")
-        except discord.Forbidden:
-            await ctx.reply("❌ Date impossible.", mention_author=False, delete_after=10)
-        return
-
-    now_local = datetime.now(timezone.utc).astimezone(PARIS_TZ)
-    if event_dt <= now_local:
-        txt = "❌ Cette date est déjà passée. Merci d'indiquer un rendez-vous futur."
-        try:
-            await ctx.author.send(txt)
-        except discord.Forbidden:
-            await ctx.reply(txt, mention_author=False, delete_after=10)
-        return
-
-    # Rappels (veille 21h & -1h si encore futurs)
-    prev, oneh = compute_reminders(event_dt, PARIS_TZ)
-
-    # Enregistrement
-    ev = Event(
-        id=uuid.uuid4().hex[:8],           # ID long (on affichera une version courte)
-        user_id=ctx.author.id,
-        title=title.strip(),
-        event_iso=event_dt.isoformat(),
-        tz="Europe/Paris",
-        prev_evening=prev,
-        one_hour=oneh,
-        created_iso=now_local.isoformat(),
-    )
-    data = _load_data()
-    data["events"].append(asdict(ev))
-    _save_data(data)
-
-    # ---- Confirmation plus lisible en DM ----
-    fmt = "%d/%m/%Y %H:%M"
-    prev_dt_str = (
-        datetime.fromisoformat(prev.time_iso).astimezone(PARIS_TZ).strftime(fmt)
-        if prev else "— (déjà passée)"
-    )
-    oneh_dt_str = (
-        datetime.fromisoformat(oneh.time_iso).astimezone(PARIS_TZ).strftime(fmt)
-        if oneh else "— (déjà passée)"
-    )
-    simple_id = ev.id[:6].upper()  # ID court
-
-    confirm = (
-        "✅ **Événement enregistré**\n"
-        f"🗓️ **Quand :** {event_dt.strftime(fmt)} (Europe/Paris)\n"
-        f"✍️ **Quoi :** {ev.title}\n"
-        "🔔 **Rappels :**\n"
-        f"• Veille 21h : {prev_dt_str}\n"
-        f"• 1h avant : {oneh_dt_str}\n"
-        f"🆔 **Réf :** {simple_id}"
-    )
-
-    try:
-        await ctx.author.send(confirm)
-    except discord.Forbidden:
-        await ctx.reply(
-            "✅ Événement enregistré (DM fermé : impossible d’envoyer la confirmation).",
-            mention_author=False,
-            delete_after=8
+        # Enregistrement
+        ev = Event(
+            id=uuid.uuid4().hex[:8],
+            user_id=ctx.author.id,
+            title=title.strip(),
+            event_iso=event_dt.isoformat(),
+            tz="Europe/Paris",
+            prev_evening=prev,
+            one_hour=oneh,
+            created_iso=now_local.isoformat(),
         )
+        data = _load_data()
+        data["events"].append(asdict(ev))
+        _save_data(data)
+
+        # Confirmation plus lisible
+        fmt = "%d/%m/%Y %H:%M"
+        prev_dt_str = (
+            datetime.fromisoformat(prev.time_iso).astimezone(PARIS_TZ).strftime(fmt)
+            if prev else "— (déjà passée)"
+        )
+        oneh_dt_str = (
+            datetime.fromisoformat(oneh.time_iso).astimezone(PARIS_TZ).strftime(fmt)
+            if oneh else "— (déjà passée)"
+        )
+        simple_id = ev.id[:6].upper()
+
+        confirm = (
+            "✅ **Événement enregistré**\n"
+            f"🗓️ **Quand :** {event_dt.strftime(fmt)} (Europe/Paris)\n"
+            f"✍️ **Quoi :** {ev.title}\n"
+            "🔔 **Rappels :**\n"
+            f"• Veille 21h : {prev_dt_str}\n"
+            f"• 1h avant : {oneh_dt_str}\n"
+            f"🆔 **Réf :** {simple_id}"
+        )
+
+        try:
+            await ctx.author.send(confirm)
+        except discord.Forbidden:
+            await ctx.reply(
+                "✅ Événement enregistré (DM fermé : impossible d’envoyer la confirmation).",
+                mention_author=False,
+                delete_after=8
+            )
 
     @commands.command(name="cal_list")
     async def list_events(self, ctx):
@@ -297,7 +308,10 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
         if not events:
             txt = "📭 Aucun événement à venir."
         else:
-            lines = [f"• `{e['id']}` — {dt.strftime('%d/%m/%Y %H:%M')} — {e['title']}" for dt, e in events[:50]]
+            lines = [
+                f"• `{e['id']}` — {dt.strftime('%d/%m/%Y %H:%M')} — {e['title']}"
+                for dt, e in events[:50]
+            ]
             txt = "**Tes événements à venir :**\n" + "\n".join(lines)
 
         try:
@@ -305,27 +319,36 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
         except discord.Forbidden:
             await ctx.reply("✉️ Ouvre tes DM pour recevoir la liste.", mention_author=False, delete_after=8)
 
-    @commands.command(name="cal_del")
-    async def delete_event(self, ctx, event_id: str = None):
-        """
-        !cal_del <id>  -> suppression directe
-        !cal_del       -> si UI dispo : menu en DM ; sinon liste + instructions
-        """
+    @commands.command(name="cal_del", aliases=["caldel", "delcal", "cal-delete"])
+    async def cal_del(self, ctx, event_id: str = None):
+        """!cal_del <id> -> suppression directe ; sans id -> menu en DM (si UI) ou liste + instructions"""
+        # Supprimer la commande en salon si possible
+        if ctx.guild:
+            try:
+                perms = ctx.channel.permissions_for(ctx.guild.me)
+                if perms.manage_messages:
+                    await ctx.message.delete()
+            except Exception:
+                pass
+
         data = _load_data()
 
-        # Avec ID -> suppression directe
+        # Suppression directe via ID
         if event_id:
             before = len(data.get("events", []))
-            data["events"] = [e for e in data.get("events", []) if not (e["user_id"] == ctx.author.id and e["id"] == event_id)]
+            data["events"] = [
+                e for e in data.get("events", [])
+                if not (e["user_id"] == ctx.author.id and e["id"] == event_id)
+            ]
             _save_data(data)
-            msg = "🗑️ Événement supprimé." if len(data.get("events", [])) < before else "❌ Aucun événement trouvé avec cet ID."
+            msg = "🗑️ Événement supprimé." if len(data["events"]) < before else "❌ Aucun événement trouvé avec cet ID."
             try:
                 await ctx.author.send(msg)
             except discord.Forbidden:
                 await ctx.reply(msg, mention_author=False, delete_after=6)
             return
 
-        # Sans ID -> proposer un menu si possible, sinon fallback texte
+        # Sans ID : proposer un menu si possible
         now_paris = datetime.now(timezone.utc).astimezone(PARIS_TZ)
         user_events = []
         for e in data.get("events", []):
@@ -347,11 +370,12 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
 
         user_events.sort(key=lambda e: datetime.fromisoformat(e["event_iso"]))
 
+        header = "**Sélectionne un événement à supprimer :**\n" + "\n".join(
+            f"• `{e['id']}` — {datetime.fromisoformat(e['event_iso']).astimezone(PARIS_TZ).strftime('%d/%m/%Y %H:%M')} — {e['title']}"
+            for e in user_events[:50]
+        )
+
         if HAVE_UI and DeleteEventView is not None:
-            header = "**Sélectionne un événement à supprimer :**\n" + "\n".join(
-                f"• `{e['id']}` — {datetime.fromisoformat(e['event_iso']).astimezone(PARIS_TZ).strftime('%d/%m/%Y %H:%M')} — {e['title']}"
-                for e in user_events[:50]
-            )
             view = DeleteEventView(self, ctx.author.id, user_events)
             try:
                 await ctx.author.send(header, view=view)
@@ -364,15 +388,15 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
                     except Exception:
                         pass
         else:
-            # Fallback texte si discord.ui indisponible
-            lines = [f"• `{e['id']}` — {datetime.fromisoformat(e['event_iso']).astimezone(PARIS_TZ).strftime('%d/%m/%Y %H:%M')} — {e['title']}" for e in user_events]
-            body = "**Environnement sans menus Discord — supprime avec `!cal_del <id>` :**\n" + "\n".join(lines)
+            # Fallback texte
             try:
-                await ctx.author.send(body)
+                await ctx.author.send(
+                    header + "\n\nℹ️ Environnement sans menus — supprime avec `!cal_del <id>`."
+                )
             except discord.Forbidden:
                 await ctx.reply("❌ Ouvre tes DM pour voir la liste et l’ID à supprimer.", mention_author=False, delete_after=8)
 
-    # ------- Tâche de rappel + purge 23:30 -------
+    # ------------------- TACHE DE RAPPel & PURGE -------------------
     @tasks.loop(seconds=60)
     async def _tick(self):
         await self.bot.wait_until_ready()
@@ -388,7 +412,7 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
             except Exception:
                 continue
 
-            # Rappels
+            # Envoi rappels
             for key in ("prev_evening", "one_hour"):
                 r = e.get(key)
                 if not r:
@@ -415,7 +439,7 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
 
             keep_events.append(e)
 
-        # Purge quotidienne à 23:30 (Heure de Paris) : supprime les évènements du jour écoulé
+        # Purge quotidienne 23:30 (Heure de Paris)
         if (self.last_daily_cleanup_date != today_local) and (now_paris.hour == 23 and now_paris.minute >= 30):
             new_keep = []
             for e in keep_events:
@@ -431,7 +455,7 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
             self.last_daily_cleanup_date = today_local
             logger.info("[Calendar] Purge quotidienne 23:30 exécutée.")
 
-        # Fallback au cas où le bot a raté des purges (offline) : on nettoie > 2 jours
+        # Fallback : purge > 2 jours si bot a été off
         new_keep2 = []
         for e in keep_events:
             try:
@@ -451,6 +475,7 @@ async def add_event(self, ctx, date: str = None, heure: str = None, *, title: st
     @_tick.before_loop
     async def _before_tick(self):
         await self.bot.wait_until_ready()
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Calendar(bot))
