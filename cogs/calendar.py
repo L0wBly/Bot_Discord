@@ -171,8 +171,8 @@ else:
 class Calendar(commands.Cog):
     """
     !cal [date] [heure] [texte…] -> crée un événement + rappels (veille 21h, -1h)
-    !cal_list -> DM la liste des événements à venir
-    !cal_del [id] -> sans id : menu en DM (si UI) ; sinon liste + suppression par id
+    !callist -> DM la liste des événements à venir
+    !caldel [id] -> sans id : menu en DM (si UI) ; sinon liste + suppression par id
     Purge quotidienne à 23:30 (Heure de Paris) des évènements du jour.
     """
 
@@ -288,7 +288,7 @@ class Calendar(commands.Cog):
                 delete_after=8
             )
 
-    @commands.command(name="cal_list")
+    @commands.command(name="callist")
     async def list_events(self, ctx):
         """DM la liste de tes événements à venir"""
         data = _load_data()
@@ -319,9 +319,9 @@ class Calendar(commands.Cog):
         except discord.Forbidden:
             await ctx.reply("✉️ Ouvre tes DM pour recevoir la liste.", mention_author=False, delete_after=8)
 
-    @commands.command(name="cal_del", aliases=["caldel", "delcal", "cal-delete"])
-    async def cal_del(self, ctx, event_id: str = None):
-        """!cal_del <id> -> suppression directe ; sans id -> menu en DM (si UI) ou liste + instructions"""
+    @commands.command(name="caldel", aliases=["caldel", "delcal", "caldelete"])
+    async def caldel(self, ctx, event_id: str = None):
+        """!caldel <id> -> suppression directe ; sans id -> menu en DM (si UI) ou liste + instructions"""
         # Supprimer la commande en salon si possible
         if ctx.guild:
             try:
@@ -384,14 +384,14 @@ class Calendar(commands.Cog):
             else:
                 if len(user_events) > 25:
                     try:
-                        await ctx.author.send("ℹ️ Tu as plus de 25 évènements : utilise `!cal_del <id>` pour ceux non listés.")
+                        await ctx.author.send("ℹ️ Tu as plus de 25 évènements : utilise `!caldel <id>` pour ceux non listés.")
                     except Exception:
                         pass
         else:
             # Fallback texte
             try:
                 await ctx.author.send(
-                    header + "\n\nℹ️ Environnement sans menus — supprime avec `!cal_del <id>`."
+                    header + "\n\nℹ️ Environnement sans menus — supprime avec `!caldel <id>`."
                 )
             except discord.Forbidden:
                 await ctx.reply("❌ Ouvre tes DM pour voir la liste et l’ID à supprimer.", mention_author=False, delete_after=8)
