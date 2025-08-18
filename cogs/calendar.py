@@ -20,7 +20,7 @@ DATA_FILE = os.path.join(os.path.dirname(__file__), "../data/calendar_events.jso
 HAVE_UI = hasattr(discord, "ui") and hasattr(discord.ui, "View")
 
 
-# ---------- Modèle ----------
+# ---------- Modèles ----------
 @dataclass
 class Reminder:
     time_iso: str
@@ -39,7 +39,7 @@ class Event:
     created_iso: str
 
 
-# ---------- Utils persistants ----------
+# ---------- Persistance ----------
 def _load_data() -> dict:
     if not os.path.exists(DATA_FILE):
         return {"events": []}
@@ -57,7 +57,7 @@ def _save_data(data: dict):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# ---------- Parsing date/heure ----------
+# ---------- Parsing ----------
 def parse_date(date_str: str, base_tz=PARIS_TZ) -> Optional[datetime.date]:
     s = date_str.strip().lower().replace("-", "/")
     now_local = datetime.now(timezone.utc).astimezone(base_tz)
@@ -107,7 +107,7 @@ def parse_time(time_str: str) -> Optional[tuple[int, int]]:
     return (hh, mm) if 0 <= hh <= 23 and 0 <= mm <= 59 else None
 
 
-# ---------- Construction rappels ----------
+# ---------- Rappels ----------
 def compute_reminders(event_dt: datetime, tz=PARIS_TZ) -> tuple[Optional[Reminder], Optional[Reminder]]:
     prev_evening_dt = tz.localize(datetime.combine(event_dt.date() - timedelta(days=1), dtime(21, 0)))
     one_hour_dt = event_dt - timedelta(hours=1)
@@ -118,7 +118,7 @@ def compute_reminders(event_dt: datetime, tz=PARIS_TZ) -> tuple[Optional[Reminde
     return prev, oneh
 
 
-# ---------- UI pour suppression (si dispo) ----------
+# ---------- UI de suppression ----------
 if HAVE_UI:
     class DeleteEventView(discord.ui.View):
         def __init__(self, cog_ref: "Calendar", user_id: int, events_for_user: list[dict]):
@@ -170,9 +170,9 @@ else:
 # ---------- Cog ----------
 class Calendar(commands.Cog):
     """
-    !cal [date] [heure] [texte…] -> crée un événement + rappels (veille 21h, -1h)
-    !callist -> DM la liste des événements à venir
-    !caldel [id] -> sans id : menu en DM (si UI) ; sinon liste + suppression par id
+    !cal                  -> crée un événement + rappels (veille 21h, -1h)
+    !callist              -> envoie la liste en DM (accusé dans le salon)
+    !caldel [id]          -> suppression (menu en DM si possible ou via ID)
     Purge quotidienne à 23:30 (Heure de Paris) des évènements du jour.
     """
 
@@ -290,7 +290,16 @@ class Calendar(commands.Cog):
 
     @commands.command(name="callist")
     async def list_events(self, ctx):
-        """DM la liste de tes événements à venir"""
+        """Envoie en DM la liste de tes événements à venir, avec accusé dans le salon."""
+        # Supprimer la commande en salon
+        if ctx.guild:
+            try:
+                perms = ctx.channel.permissions_for(ctx.guild.me)
+                if perms.manage_messages:
+                    await ctx.message.delete()
+            except Exception:
+                pass
+
         data = _load_data()
         now_paris = datetime.now(timezone.utc).astimezone(PARIS_TZ)
         events = []
@@ -308,21 +317,24 @@ class Calendar(commands.Cog):
         if not events:
             txt = "📭 Aucun événement à venir."
         else:
-            lines = [
-                f"• `{e['id']}` — {dt.strftime('%d/%m/%Y %H:%M')} — {e['title']}"
-                for dt, e in events[:50]
-            ]
+            lines = [f"• `{e['id']}` — {dt.strftime('%d/%m/%Y %H:%M')} — {e['title']}" for dt, e in events[:50]]
             txt = "**Tes événements à venir :**\n" + "\n".join(lines)
 
         try:
-            await ctx.author.send(txt)
+            await ctx.author.send(txt)  # DM
+            if ctx.guild:
+                try:
+                    ack = await ctx.channel.send("📬 Je t’ai envoyé ta liste en DM.")
+                    await ack.delete(delay=5)
+                except Exception:
+                    pass
         except discord.Forbidden:
             await ctx.reply("✉️ Ouvre tes DM pour recevoir la liste.", mention_author=False, delete_after=8)
 
-    @commands.command(name="caldel", aliases=["caldel", "delcal", "caldelete"])
-    async def caldel(self, ctx, event_id: str = None):
+    @commands.command(name="caldel")
+    async def cal_del(self, ctx, event_id: str = None):
         """!caldel <id> -> suppression directe ; sans id -> menu en DM (si UI) ou liste + instructions"""
-        # Supprimer la commande en salon si possible
+        # Supprimer la commande en salon
         if ctx.guild:
             try:
                 perms = ctx.channel.permissions_for(ctx.guild.me)
@@ -396,7 +408,7 @@ class Calendar(commands.Cog):
             except discord.Forbidden:
                 await ctx.reply("❌ Ouvre tes DM pour voir la liste et l’ID à supprimer.", mention_author=False, delete_after=8)
 
-    # ------------------- TACHE DE RAPPel & PURGE -------------------
+    # ------------------- TÂCHE DE RAPPEL & PURGE -------------------
     @tasks.loop(seconds=60)
     async def _tick(self):
         await self.bot.wait_until_ready()
@@ -412,7 +424,7 @@ class Calendar(commands.Cog):
             except Exception:
                 continue
 
-            # Envoi rappels
+            # Envoi des rappels
             for key in ("prev_evening", "one_hour"):
                 r = e.get(key)
                 if not r:
@@ -430,7 +442,7 @@ class Calendar(commands.Cog):
                                 f"⏰ **Rappel {label}**\n"
                                 f"• Quand : {evt_dt.strftime('%d/%m/%Y %H:%M')}\n"
                                 f"• Quoi  : {e['title']}\n"
-                                f"• ID : `{e['||id||']}`"
+                                f"• ID : `{e['id']}`"
                             )
                             e[key]["sent"] = True
                             changed = True
