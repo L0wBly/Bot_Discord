@@ -177,85 +177,105 @@ class Calendar(commands.Cog):
 
     # ------- Commandes -------
     @commands.command(name="cal")
-    async def add_event(self, ctx, date: str = None, heure: str = None, *, title: str = None):
-        """!cal [date] [heure] [texte...] (utilisable en DM ou en salon)"""
-        # Supprimer la commande en SALON si possible
-        if ctx.guild:
-            try:
-                perms = ctx.channel.permissions_for(ctx.guild.me)
-                if perms.manage_messages:
-                    await ctx.message.delete()
-            except Exception:
-                pass
-
-        if not (date and heure and title):
-            msg = ("❌ Usage : `!cal [date] [heure] [texte]`\n"
-                   "Exemples : `!cal 18/08 16h Rendez-vous dentiste` | `!cal demain 9:30 Réu`")
-            try:
-                await ctx.author.send(msg)
-            except discord.Forbidden:
-                await ctx.reply(msg, mention_author=False, delete_after=10)
-            return
-
-        evt_date = parse_date(date)
-        hm = parse_time(heure)
-        if not evt_date or not hm:
-            txt = "❌ Date/heure invalides. Ex : `17/08`, `17/08/2025`, `demain`, `16h`, `09:30`."
-            try:
-                await ctx.author.send(txt)
-            except discord.Forbidden:
-                await ctx.reply(txt, mention_author=False, delete_after=10)
-            return
-
-        hh, mm = hm
+async def add_event(self, ctx, date: str = None, heure: str = None, *, title: str = None):
+    """!cal [date] [heure] [texte...] (utilisable en DM ou en salon)"""
+    # Supprimer la commande en SALON si possible
+    if ctx.guild:
         try:
-            naive = datetime(evt_date.year, evt_date.month, evt_date.day, hh, mm, 0)
-            event_dt = PARIS_TZ.localize(naive)
+            perms = ctx.channel.permissions_for(ctx.guild.me)
+            if perms.manage_messages:
+                await ctx.message.delete()
         except Exception:
-            try:
-                await ctx.author.send("❌ Date impossible.")
-            except discord.Forbidden:
-                await ctx.reply("❌ Date impossible.", mention_author=False, delete_after=10)
-            return
+            pass
 
-        now_local = datetime.now(timezone.utc).astimezone(PARIS_TZ)
-        if event_dt <= now_local:
-            txt = "❌ Cette date est déjà passée. Merci d'indiquer un rendez-vous futur."
-            try:
-                await ctx.author.send(txt)
-            except discord.Forbidden:
-                await ctx.reply(txt, mention_author=False, delete_after=10)
-            return
-
-        prev, oneh = compute_reminders(event_dt, PARIS_TZ)
-
-        ev = Event(
-            id=uuid.uuid4().hex[:8],
-            user_id=ctx.author.id,
-            title=title.strip(),
-            event_iso=event_dt.isoformat(),
-            tz="Europe/Paris",
-            prev_evening=prev,
-            one_hour=oneh,
-            created_iso=now_local.isoformat(),
-        )
-
-        data = _load_data()
-        data["events"].append(asdict(ev))
-        _save_data(data)
-
-        # Confirmation en DM
-        prev_txt = f"Veille 21h : {prev.time_iso}" if prev else "Veille 21h : (déjà passée, non planifiée)"
-        oneh_txt = f"-1h : {oneh.time_iso}" if oneh else "-1h : (déjà passée, non planifiée)"
-        confirm = (f"✅ **Événement enregistré**\n"
-                   f"• Quand : {event_dt.strftime('%d/%m/%Y %H:%M')} (Europe/Paris)\n"
-                   f"• Quoi  : {ev.title}\n"
-                   f"• Rappels → {prev_txt} | {oneh_txt}\n"
-                   f"• ID : `{ev.id}`")
+    # Vérifs arguments
+    if not (date and heure and title):
+        msg = ("❌ Usage : `!cal [date] [heure] [texte]`\n"
+               "Exemples : `!cal 18/08 16h Rendez-vous dentiste` | `!cal demain 9:30 Réu`")
         try:
-            await ctx.author.send(confirm)
+            await ctx.author.send(msg)
         except discord.Forbidden:
-            await ctx.reply("✅ Événement enregistré (DM fermé : impossible d’envoyer la confirmation).", mention_author=False, delete_after=8)
+            await ctx.reply(msg, mention_author=False, delete_after=10)
+        return
+
+    evt_date = parse_date(date)
+    hm = parse_time(heure)
+    if not evt_date or not hm:
+        txt = "❌ Date/heure invalides. Ex : `17/08`, `17/08/2025`, `demain`, `16h`, `09:30`."
+        try:
+            await ctx.author.send(txt)
+        except discord.Forbidden:
+            await ctx.reply(txt, mention_author=False, delete_after=10)
+        return
+
+    hh, mm = hm
+    try:
+        naive = datetime(evt_date.year, evt_date.month, evt_date.day, hh, mm, 0)
+        event_dt = PARIS_TZ.localize(naive)
+    except Exception:
+        try:
+            await ctx.author.send("❌ Date impossible.")
+        except discord.Forbidden:
+            await ctx.reply("❌ Date impossible.", mention_author=False, delete_after=10)
+        return
+
+    now_local = datetime.now(timezone.utc).astimezone(PARIS_TZ)
+    if event_dt <= now_local:
+        txt = "❌ Cette date est déjà passée. Merci d'indiquer un rendez-vous futur."
+        try:
+            await ctx.author.send(txt)
+        except discord.Forbidden:
+            await ctx.reply(txt, mention_author=False, delete_after=10)
+        return
+
+    # Rappels (veille 21h & -1h si encore futurs)
+    prev, oneh = compute_reminders(event_dt, PARIS_TZ)
+
+    # Enregistrement
+    ev = Event(
+        id=uuid.uuid4().hex[:8],           # ID long (on affichera une version courte)
+        user_id=ctx.author.id,
+        title=title.strip(),
+        event_iso=event_dt.isoformat(),
+        tz="Europe/Paris",
+        prev_evening=prev,
+        one_hour=oneh,
+        created_iso=now_local.isoformat(),
+    )
+    data = _load_data()
+    data["events"].append(asdict(ev))
+    _save_data(data)
+
+    # ---- Confirmation plus lisible en DM ----
+    fmt = "%d/%m/%Y %H:%M"
+    prev_dt_str = (
+        datetime.fromisoformat(prev.time_iso).astimezone(PARIS_TZ).strftime(fmt)
+        if prev else "— (déjà passée)"
+    )
+    oneh_dt_str = (
+        datetime.fromisoformat(oneh.time_iso).astimezone(PARIS_TZ).strftime(fmt)
+        if oneh else "— (déjà passée)"
+    )
+    simple_id = ev.id[:6].upper()  # ID court
+
+    confirm = (
+        "✅ **Événement enregistré**\n"
+        f"🗓️ **Quand :** {event_dt.strftime(fmt)} (Europe/Paris)\n"
+        f"✍️ **Quoi :** {ev.title}\n"
+        "🔔 **Rappels :**\n"
+        f"• Veille 21h : {prev_dt_str}\n"
+        f"• 1h avant : {oneh_dt_str}\n"
+        f"🆔 **Réf :** {simple_id}"
+    )
+
+    try:
+        await ctx.author.send(confirm)
+    except discord.Forbidden:
+        await ctx.reply(
+            "✅ Événement enregistré (DM fermé : impossible d’envoyer la confirmation).",
+            mention_author=False,
+            delete_after=8
+        )
 
     @commands.command(name="cal_list")
     async def list_events(self, ctx):
