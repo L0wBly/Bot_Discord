@@ -32,10 +32,6 @@ class HelpCog(commands.Cog):
 
         embed.add_field(name="❓ `!help`", value="→ Affiche les commandes générales", inline=False)
         embed.add_field(name="🎮 `!helpjeu`", value="→ Affiche les commandes du jeu", inline=False)
-        embed.add_field(name="🎂 `!anniv JJ-MM`", value="→ Enregistre ta date d'anniversaire", inline=False)
-        embed.add_field(name="📅 `!anniv`", value="→ Affiche ta date actuelle", inline=False)
-        embed.add_field(name="🗑️ `!delanniv`", value="→ Supprime ton anniversaire", inline=False)
-        embed.add_field(name="🔮 `!annivs`", value="→ Liste les 20 anniversaires à venir", inline=False)
         embed.add_field(name="📊 `!classement`", value="→ Classement du serveur", inline=False)
         embed.add_field(name="🎮 `!guess`", value="→ Devine un personnage d’anime", inline=False)
         embed.add_field(name="🧹 `!clear`", value="→ Supprime tes propres messages", inline=False)
