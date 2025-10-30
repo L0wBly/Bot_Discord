@@ -1,5 +1,6 @@
 # cogs/mangadex.py
 
+# ===== Imports =====
 import os
 import re
 import aiohttp
@@ -18,10 +19,10 @@ except Exception:
 # ===== Constants =====
 MANGADEX_API = "https://api.mangadex.org"
 UPLOADS_BASE = "https://uploads.mangadex.org"
-
 UUID_RE = re.compile(r"(?P<id>[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12})")
 LANG_RE = re.compile(r"^[a-z]{2}(?:-[a-z]{2})?$")
-
+CH_RE_1 = re.compile(r'^(?:c|ch|chap|chapter)[:=](.+)$', re.I)
+CH_RE_2 = re.compile(r'^#(.+)$')
 
 # ===== Utils =====
 def env_token() -> Optional[str]:
@@ -58,7 +59,6 @@ def tags_list(tag_objs: List[Dict[str, Any]]) -> List[str]:
         if isinstance(name, dict):
             out.append(name.get("fr") or name.get("en") or next(iter(name.values()), None))
     return [t for t in out if t]
-
 
 # ===== HTTP Client =====
 class MangaDexHTTP:
@@ -97,8 +97,7 @@ class MangaDexHTTP:
         except Exception:
             return False
 
-
-# ===== Discord UI: Paginator =====
+# ===== Discord UI =====
 class SearchPaginator(discord.ui.View):
     def __init__(self, embeds: List[discord.Embed], author_id: int, timeout: int = 60):
         super().__init__(timeout=timeout)
@@ -119,7 +118,6 @@ class SearchPaginator(discord.ui.View):
         self.index = (self.index + 1) % len(self.embeds)
         await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
 
-
 # ===== Cog =====
 class MangaDex(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -137,7 +135,7 @@ class MangaDex(commands.Cog):
             description=(
                 f"`{prefix}manga search <titre>`\n"
                 f"`{prefix}manga info <id|url|titre>`\n"
-                f"`{prefix}manga chapters <id|url|titre> <lang> [limit]`"
+                f"`{prefix}manga chapters <id|url|titre> <lang> [limit] [c:10|#10]`"
             ),
             color=discord.Color.orange(),
         )
@@ -265,27 +263,33 @@ class MangaDex(commands.Cog):
         if len(parts) < 2:
             await ctx.reply(
                 "❌ Langue requise.\n"
-                "Usage : `!manga chapters <id|url|titre> <lang> [limit]`\n"
-                "Exemples : `!manga chapters one piece fr 10`, `!manga chapters berserk en 5`, `!manga chapters naruto pt-br 8`",
+                "Usage : `!manga chapters <id|url|titre> <lang> [limit] [c:10|#10]`",
                 mention_author=False,
             )
             return
 
         ref = parts[0]
-        lang = None
+        lang: Optional[str] = None
         limit = 10
+        chapter: Optional[str] = None
+
         for p in parts[1:]:
+            cand = clean_lang(p)
+            if cand and not lang:
+                lang = cand
+                continue
+            m = CH_RE_1.match(p) or CH_RE_2.match(p)
+            if m:
+                chapter = m.group(1).strip()
+                continue
             if p.isdigit():
                 limit = max(1, min(30, int(p)))
                 continue
-            cand = clean_lang(p)
-            if cand:
-                lang = cand
 
         if not lang:
             await ctx.reply(
                 "❌ Langue invalide ou manquante. Utilise un code comme `fr`, `en`, `pt-br`.\n"
-                "Usage : `!manga chapters <id|url|titre> <lang> [limit]`",
+                "Usage : `!manga chapters <id|url|titre> <lang> [limit] [c:10|#10]`",
                 mention_author=False,
             )
             return
@@ -303,11 +307,15 @@ class MangaDex(commands.Cog):
             ("manga", manga_id),
             ("translatedLanguage[]", lang),
             ("limit", str(limit)),
-            ("order[chapter]", "desc"),
             ("includes[]", "scanlation_group"),
             ("includes[]", "manga"),
             ("includeFutureUpdates", "0"),
         ]
+        if chapter:
+            params.append(("chapter", chapter))
+            params.append(("order[chapter]", "asc"))
+        else:
+            params.append(("order[chapter]", "desc"))
 
         try:
             cdata = await self.http.get("/chapter", params)
@@ -317,7 +325,10 @@ class MangaDex(commands.Cog):
 
         chs = cdata.get("data", [])
         if not chs:
-            await ctx.reply(f"Aucun chapitre trouvé pour la langue `{lang}`.", mention_author=False)
+            if chapter:
+                await ctx.reply(f"Aucun chapitre `{chapter}` trouvé en `{lang}`.", mention_author=False)
+            else:
+                await ctx.reply(f"Aucun chapitre trouvé pour la langue `{lang}`.", mention_author=False)
             return
 
         lines = []
@@ -331,14 +342,15 @@ class MangaDex(commands.Cog):
             link = f"https://mangadex.org/chapter/{cid}"
             lines.append(f"• Ch. **{ch_no}** (Vol. {vol}) — {title or '_sans titre_'} — [Lire]({link})")
 
+        head = f"Chapitre {chapter} • {lang.upper()}" if chapter else f"Derniers chapitres • {lang.upper()}"
         embed = discord.Embed(
-            title=f"Derniers chapitres • {lang.upper()}",
+            title=head,
             url=f"https://mangadex.org/title/{manga_id}",
             description="\n".join(lines)[:4000],
             color=discord.Color.purple(),
         )
         await ctx.reply(embed=embed, mention_author=False)
 
-
+# ===== Setup =====
 async def setup(bot: commands.Bot):
     await bot.add_cog(MangaDex(bot))
