@@ -9,31 +9,29 @@ from typing import Any, Dict, List, Optional, Tuple
 import discord
 from discord.ext import commands
 
+# ===== Config =====
 try:
     from config import MANGADEX_TOKEN as CFG_MD_TOKEN  # type: ignore
 except Exception:
     CFG_MD_TOKEN = None
 
-try:
-    from config import MANGADEX_DEFAULT_LANG as CFG_MD_LANG  # type: ignore
-except Exception:
-    CFG_MD_LANG = None
-
+# ===== Constants =====
 MANGADEX_API = "https://api.mangadex.org"
 UPLOADS_BASE = "https://uploads.mangadex.org"
 
-UUID_RE = re.compile(
-    r"(?P<id>[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12})"
-)
+UUID_RE = re.compile(r"(?P<id>[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12})")
+LANG_RE = re.compile(r"^[a-z]{2}(?:-[a-z]{2})?$")
 
 
 # ===== Utils =====
-
 def env_token() -> Optional[str]:
     return CFG_MD_TOKEN or os.getenv("MANGADEX_TOKEN")
 
-def env_lang() -> str:
-    return (CFG_MD_LANG or os.getenv("MANGADEX_DEFAULT_LANG") or "fr").lower()
+def clean_lang(x: Optional[str]) -> Optional[str]:
+    if not x:
+        return None
+    x = x.strip().lower().replace("_", "-").rstrip(",.;:")
+    return x if LANG_RE.match(x) else None
 
 def extract_uuid(text: str) -> Optional[str]:
     m = UUID_RE.search(text)
@@ -63,7 +61,6 @@ def tags_list(tag_objs: List[Dict[str, Any]]) -> List[str]:
 
 
 # ===== HTTP Client =====
-
 class MangaDexHTTP:
     def __init__(self, token: Optional[str] = None):
         self.token = token
@@ -102,7 +99,6 @@ class MangaDexHTTP:
 
 
 # ===== Discord UI: Paginator =====
-
 class SearchPaginator(discord.ui.View):
     def __init__(self, embeds: List[discord.Embed], author_id: int, timeout: int = 60):
         super().__init__(timeout=timeout)
@@ -125,7 +121,6 @@ class SearchPaginator(discord.ui.View):
 
 
 # ===== Cog =====
-
 class MangaDex(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -142,7 +137,7 @@ class MangaDex(commands.Cog):
             description=(
                 f"`{prefix}manga search <titre>`\n"
                 f"`{prefix}manga info <id|url|titre>`\n"
-                f"`{prefix}manga chapters <id|url|titre> [lang] [limit]`"
+                f"`{prefix}manga chapters <id|url|titre> <lang> [limit]`"
             ),
             color=discord.Color.orange(),
         )
@@ -158,7 +153,6 @@ class MangaDex(commands.Cog):
             ("includes[]", "artist"),
             ("contentRating[]", "safe"),
             ("contentRating[]", "suggestive"),
-            ("availableTranslatedLanguage[]", env_lang()),
         ]
         data = await self.http.get("/manga", params)
         results = data.get("data", [])
@@ -221,7 +215,10 @@ class MangaDex(commands.Cog):
                 return
             manga_id = items[0]["id"]
 
-        data = await self.http.get(f"/manga/{manga_id}", [("includes[]", "cover_art"), ("includes[]", "author"), ("includes[]", "artist")])
+        data = await self.http.get(
+            f"/manga/{manga_id}",
+            [("includes[]", "cover_art"), ("includes[]", "author"), ("includes[]", "artist")],
+        )
         obj = data.get("data")
         if not obj:
             await ctx.reply("Introuvable.", mention_author=False)
@@ -265,8 +262,13 @@ class MangaDex(commands.Cog):
     @manga_root.command(name="chapters")
     async def manga_chapters(self, ctx: commands.Context, *, args: str):
         parts = args.split()
-        if not parts:
-            await ctx.reply("Usage: `!manga chapters <id|url|titre> [lang] [limit]`", mention_author=False)
+        if len(parts) < 2:
+            await ctx.reply(
+                "❌ Langue requise.\n"
+                "Usage : `!manga chapters <id|url|titre> <lang> [limit]`\n"
+                "Exemples : `!manga chapters one piece fr 10`, `!manga chapters berserk en 5`, `!manga chapters naruto pt-br 8`",
+                mention_author=False,
+            )
             return
 
         ref = parts[0]
@@ -275,10 +277,19 @@ class MangaDex(commands.Cog):
         for p in parts[1:]:
             if p.isdigit():
                 limit = max(1, min(30, int(p)))
-            elif len(p) in (2, 5):
-                lang = p.lower()
+                continue
+            cand = clean_lang(p)
+            if cand:
+                lang = cand
 
-        lang = lang or env_lang()
+        if not lang:
+            await ctx.reply(
+                "❌ Langue invalide ou manquante. Utilise un code comme `fr`, `en`, `pt-br`.\n"
+                "Usage : `!manga chapters <id|url|titre> <lang> [limit]`",
+                mention_author=False,
+            )
+            return
+
         manga_id = extract_uuid(ref)
         if not manga_id:
             sdata = await self.http.get("/manga", [("title", ref), ("limit", "1")])
@@ -297,10 +308,16 @@ class MangaDex(commands.Cog):
             ("includes[]", "manga"),
             ("includeFutureUpdates", "0"),
         ]
-        cdata = await self.http.get("/chapter", params)
+
+        try:
+            cdata = await self.http.get("/chapter", params)
+        except Exception as e:
+            await ctx.reply(f"Erreur API MangaDex: {e}", mention_author=False)
+            return
+
         chs = cdata.get("data", [])
         if not chs:
-            await ctx.reply("Aucun chapitre trouvé pour cette langue.", mention_author=False)
+            await ctx.reply(f"Aucun chapitre trouvé pour la langue `{lang}`.", mention_author=False)
             return
 
         lines = []
@@ -314,11 +331,10 @@ class MangaDex(commands.Cog):
             link = f"https://mangadex.org/chapter/{cid}"
             lines.append(f"• Ch. **{ch_no}** (Vol. {vol}) — {title or '_sans titre_'} — [Lire]({link})")
 
-        desc = "\n".join(lines)
         embed = discord.Embed(
             title=f"Derniers chapitres • {lang.upper()}",
             url=f"https://mangadex.org/title/{manga_id}",
-            description=desc[:4000],
+            description="\n".join(lines)[:4000],
             color=discord.Color.purple(),
         )
         await ctx.reply(embed=embed, mention_author=False)
